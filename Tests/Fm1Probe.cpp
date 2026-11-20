@@ -14,6 +14,7 @@
 #include "FM1Live.h"
 #include "FM1Clock.h"
 #include "SampleTools.h"
+#include "SoundModel.h"
 
 using namespace sloop;
 
@@ -271,15 +272,15 @@ static int iacTest()
 }
 
 // The PLAY bridge: presses the FM-1's PLAY twice through the live link (as its button) and listens
-// on the "SLOOP Studio" MIDI port for what FL's script would get (CC 118 play / 119 stop, ch 16).
+// on the "Floop Studio" MIDI port for what FL's script would get (CC 118 play / 119 stop, ch 16).
 // FL's transport is played by hand here: "FL" is always the other way, so each press must go out.
 static int bridgeTest()
 {
     juce::MidiDeviceInfo src;
-    for (auto& d : juce::MidiInput::getAvailableDevices()) if (d.name == "SLOOP Studio") src = d;
+    for (auto& d : juce::MidiInput::getAvailableDevices()) if (d.name == "Floop Studio") src = d;
     if (src.identifier.isEmpty()) { sloop::VirtualMidiSource::get(); juce::Thread::sleep(300);
-        for (auto& d : juce::MidiInput::getAvailableDevices()) if (d.name == "SLOOP Studio") src = d; }
-    std::printf("[puerto] %s\n", src.identifier.isEmpty() ? "SLOOP Studio creado (esc\xc3\xba" "chalo desde otro programa)" : "SLOOP Studio");
+        for (auto& d : juce::MidiInput::getAvailableDevices()) if (d.name == "Floop Studio") src = d; }
+    std::printf("[puerto] %s\n", src.identifier.isEmpty() ? "Floop Studio creado (esc\xc3\xba" "chalo desde otro programa)" : "Floop Studio");
     struct Cc : juce::MidiInputCallback
     {
         std::atomic<int> last { -1 };
@@ -321,8 +322,257 @@ static int bridgeTest()
     return ok ? 0 : 1;
 }
 
+// The selected track's sound, page by page, as SONIDO shows it (read only: DUMP, NAMES, DESC).
+static int soundRead(int wantTrack)
+{
+    Fm1Connection fm;
+    juce::String err;
+    fm1::Info info;
+    if (!fm.open(err) || !readInfo(fm, info, err)) { std::printf("ERROR %s\n", err.toRawUTF8()); return 1; }
+    std::printf("SLOOP %s: %d motores, P_COUNT %d, G_COUNT %d, P_E0 %d, NSTEP %d\n", info.version.c_str(), info.nEngines,
+                info.pCount, info.gCount, info.pE0, info.nStep);
+    for (auto& e : info.engines) std::printf("  [%s]", e.c_str());
+    std::printf("\n");
+    const auto tr = fm.request(fm1::TRACK);
+    const int before = tr && !tr->empty() ? (*tr)[0] : -1;
+    if (wantTrack >= 0) fm.request(fm1::TRACK, { (uint8_t) deviceTrack(wantTrack) });   // (put back at the end)
+    const int sel = wantTrack >= 0 ? deviceTrack(wantTrack) : before;
+    struct Restore { Fm1Connection& f; int t; ~Restore() { if (t >= 0) f.request(fm1::TRACK, { (uint8_t) t }); } } restore { fm, wantTrack >= 0 ? before : -1 };
+    const auto d = fm.request(4);
+    const auto dump = d ? snd::parseDump(*d, info.pCount, info.gCount) : std::nullopt;
+    if (!dump) { std::printf("ERROR DUMP\n"); return 1; }
+    const bool drums = dump->engine >= info.nEngines;
+    std::printf("pista seleccionada %d: motor %s, preset %d\n", sel,
+                drums ? "DRUMS" : info.engines[(size_t) dump->engine].c_str(), dump->preset);
+    snd::Names names;
+    if (!drums)
+        if (const auto n = fm.request(10, { (uint8_t) dump->engine }); n)
+            if (auto nn = snd::parseNames(*n)) names = *nn;
+    std::printf("presets: %zu", names.presets.size());
+    for (size_t i = 0; i < names.presets.size() && i < 6; ++i) std::printf(" [%s]", names.presets[i].c_str());
+    std::printf("  ediciones: %s / %s\n", names.edit1.c_str(), names.edit2.c_str());
+    int descs = 0;
+    const double t0 = juce::Time::getMillisecondCounterHiRes();
+    for (const auto& pg : drums ? snd::drumPages() : snd::synthPages())
+    {
+        std::printf("%-9s", pg.engine ? (pg.ids[0] == snd::P_E0 ? names.edit1 : names.edit2).c_str() : pg.title);
+        for (int id : pg.ids)
+        {
+            if (id == snd::kNone) continue;
+            const auto r = fm.request(5, { (uint8_t) pg.scope, (uint8_t) id });
+            const auto ds = r ? snd::parseDesc(*r) : std::nullopt;
+            ++descs;
+            if (!ds) { std::printf(" | ?%d", id); continue; }
+            const int v = pg.scope == 0 ? dump->params[(size_t) id] : (id < (int) dump->globals.size() ? dump->globals[(size_t) id] : 0);
+            std::printf(" | %s %s", ds->label.c_str(), snd::formatValue(*ds, v).c_str());
+        }
+        std::printf("\n");
+    }
+    std::printf("(%d DESC en %.0f ms)\n", descs, juce::Time::getMillisecondCounterHiRes() - t0);
+    return 0;
+}
+
+// SONIDO through the live link, on SYNTH 1: a knob (REV) and a preset (the next one), each checked
+// on the FM-1 with a separate read. Everything is put back: the preset, then all 71 parameters as
+// they were (DUMP before), then the selected track.
+static int soundWriteTest()
+{
+    Fm1Connection fm;
+    juce::String err;
+    fm1::Info info;
+    if (!fm.open(err) || !readInfo(fm, info, err)) { std::printf("ERROR %s\n", err.toRawUTF8()); return 1; }
+    const auto tr = fm.request(fm1::TRACK);
+    const int before = tr && !tr->empty() ? (*tr)[0] : 3;
+    fm.request(fm1::TRACK, { 0 });   // SYNTH 1
+    const auto d0 = fm.request(4);
+    const auto saved = d0 ? snd::parseDump(*d0, info.pCount, info.gCount) : std::nullopt;
+    fm.request(fm1::TRACK, { (uint8_t) before });
+    if (!saved) { std::printf("ERROR DUMP\n"); return 1; }
+    std::printf("[guardado] SYNTH 1: motor %s, preset %d, REV %d\n", info.engines[(size_t) saved->engine].c_str(), saved->preset,
+                saved->params[(size_t) snd::P_REV]);
+    auto get = [&fm](int id) { const auto r = fm.request(fm1::TRACK_PARAM, { 0, (uint8_t) id });
+                               return r && r->size() >= 4 ? fm1::decodeV14((*r)[2], (*r)[3]) : -9999; };
+
+    auto& s = Session::shared();
+    juce::SharedResourcePointer<Fm1Live> link;
+    link->setEnabled(true);
+    for (int i = 0; i < 100 && !link->isLive(); ++i) juce::Thread::sleep(50);
+    s.selected = 1; s.touch();                       // the SYNTH 1 tab
+    for (int i = 0; i < 100 && !(link->sound().valid && link->sound().track == 1); ++i) juce::Thread::sleep(50);
+    auto snap = link->sound();
+    std::printf("[SONIDO] pista %d: %s, preset %d (%s), %zu perillas, %zu presets de usuario\n", snap.track,
+                snap.engines[(size_t) snap.engine].c_str(), snap.preset,
+                snap.preset < (int) snap.presets.size() ? snap.presets[(size_t) snap.preset].c_str() : "?", snap.values.size(), snap.user.size());
+
+    const int rev = saved->params[(size_t) snd::P_REV], newRev = rev < 100 ? rev + 20 : rev - 20;
+    link->setSoundParam(0, snd::P_REV, newRev);
+    juce::Thread::sleep(500);
+    const int seenRev = get(snd::P_REV);
+    std::printf("[perilla REV] %d -> %d, el FM-1 tiene %d\n", rev, newRev, seenRev);
+
+    const int other = saved->preset + 1 < (int) snap.presets.size() ? saved->preset + 1 : 0;
+    link->choosePreset(other);
+    for (int i = 0; i < 40 && link->sound().preset != other; ++i) juce::Thread::sleep(50);
+    const auto d1 = fm.request(fm1::TRACK_PARAM, { 0, (uint8_t) snd::P_REV });   // (any read; the preset comes from TRACK)
+    const auto t1 = fm.request(fm1::TRACK);
+    const int presetSeen = t1 && t1->size() >= 3 + 2 ? (*t1)[2 + 1] : -1;   // TRACK: sel, NTRK, per track: engine, preset...
+    std::printf("[preset] %d -> %d, el plugin ve %d, el FM-1 tiene %d\n", saved->preset, other, link->sound().preset, presetSeen);
+    juce::ignoreUnused(d1);
+
+    // put it all back
+    link->choosePreset(saved->preset);
+    for (int i = 0; i < 40 && link->sound().preset != saved->preset; ++i) juce::Thread::sleep(50);
+    juce::Thread::sleep(300);
+    link->setEnabled(false);
+    int restored = 0, differ = 0;
+    for (int id = 0; id < snd::P_COUNT; ++id)
+    {
+        if (id == snd::P_MUTE || id == snd::P_SLEN) continue;   // (the pattern's own, untouched)
+        if (get(id) == saved->params[(size_t) id]) continue;
+        fm.request(fm1::TRACK_PARAM, fm1::trackParamSet(0, id, saved->params[(size_t) id]));
+        ++restored;
+        if (get(id) != saved->params[(size_t) id]) ++differ;
+    }
+    fm.request(fm1::TRACK, { (uint8_t) before });
+    const auto d2 = fm.request(4);
+    std::printf("[restaurado] preset %d, %d valores reescritos, %d distintos; pista seleccionada %d\n", saved->preset, restored, differ, before);
+    juce::ignoreUnused(d2);
+    const bool ok = seenRev == newRev && link->sound().preset == saved->preset && differ == 0 && presetSeen == other;
+    std::printf("%s\n", ok ? "SONIDO OK" : "SONIDO REVISAR");
+    return ok ? 0 : 1;
+}
+
+// REMOTE through the live link (as MAPA MIDI): on, HOME pressed and let go (CC 108), off; the
+// FM-1's REMOTE setting is read before, during and after.
+static int remoteTest()
+{
+    auto readRemote = []() {
+        Fm1Connection fm; juce::String err;
+        if (!fm.open(err)) return -9;
+        const auto g = fm.request(2, { 1, (uint8_t) Fm1Live::kRemoteParam });
+        return g && g->size() >= 4 ? fm1::decodeV14((*g)[2], (*g)[3]) : -1;
+    };
+    const int before = readRemote();
+    juce::SharedResourcePointer<Fm1Live> link;
+    link->setEnabled(true);
+    for (int i = 0; i < 100 && !link->isLive(); ++i) juce::Thread::sleep(50);
+    link->setRemote(true);
+    for (int i = 0; i < 40 && !link->remoteChannel(); ++i) juce::Thread::sleep(50);
+    const int during = readRemote();
+    const uint8_t ch = (uint8_t) (Fm1Live::kRemoteChannel - 1);
+    link->sendMidi({ (uint8_t) (0xB0 | ch), 108, 127 });   // HOME down
+    juce::Thread::sleep(120);
+    link->sendMidi({ (uint8_t) (0xB0 | ch), 108, 0 });     // HOME up: a tap
+    juce::Thread::sleep(300);
+    link->setRemote(false);
+    for (int i = 0; i < 40 && link->remoteChannel(); ++i) juce::Thread::sleep(50);
+    link->setEnabled(false);
+    const int after = readRemote();
+    std::printf("[REMOTE] antes %d, con remote %d, después %d (HOME pulsado por CC 108)\n", before, during, after);
+    const bool ok = during == Fm1Live::kRemoteChannel && after == before;
+    std::printf("%s\n", ok ? "REMOTE OK" : "REMOTE REVISAR");
+    return ok ? 0 : 1;
+}
+
+// MAPA MIDI's keys: plays C4 on the FM-1 as a click on the map would (channel 16), then prints the
+// keys played on the FM-1 for s seconds, as the map lights them.
+static int keysTest(int seconds)
+{
+    juce::SharedResourcePointer<Fm1Live> link;
+    link->setEnabled(true);
+    for (int i = 0; i < 100 && !link->isLive(); ++i) juce::Thread::sleep(50);
+    if (!link->isLive()) { std::printf("sin enlace\n"); return 1; }
+    const uint8_t ch = (uint8_t) (Fm1Live::kRemoteChannel - 1);
+    link->sendMidi({ (uint8_t) (0x90 | ch), 60, 100 });
+    juce::Thread::sleep(400);
+    link->sendMidi({ (uint8_t) (0x80 | ch), 60, 0 });
+    std::printf("[mapa] C4 (60) enviada al FM-1 por el canal 16\n[escuchando] toca teclas en el FM-1...\n");
+    std::fflush(stdout);
+    uint32_t seen = link->noteRevision();
+    int presses = 0;
+    const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) seconds * 1000u;
+    while (juce::Time::getMillisecondCounter() < end)
+    {
+        if (const auto r = link->noteRevision(); r != seen)
+        {
+            seen = r;
+            std::string held;
+            for (int n = 0; n < 128; ++n) if (link->noteHeld(n)) held += (held.empty() ? "" : " ") + std::to_string(n);
+            std::printf("[teclas encendidas] %s\n", held.empty() ? "(ninguna)" : held.c_str());
+            std::fflush(stdout);
+            if (!held.empty()) ++presses;
+        }
+        juce::Thread::sleep(20);
+    }
+    link->setEnabled(false);
+    std::printf("%d pulsaciones vistas\n", presses);
+    return presses > 0 ? 0 : 1;
+}
+
+// The FM-1 as the clock (reloj: fm-1 -> fl): SYNC and CLOCK before / during / after, and the clock
+// pulses counted for one second on the FM-1's port.
+static int clockOutTest()
+{
+    auto read = [](int id) {
+        Fm1Connection fm; juce::String err;
+        if (!fm.open(err)) return -9;
+        const auto g = fm.request(2, { 1, (uint8_t) id });
+        return g && g->size() >= 4 ? fm1::decodeV14((*g)[2], (*g)[3]) : -1;
+    };
+    const int syncBefore = read(Fm1Live::kSyncParam), clkBefore = read(Fm1Live::kClockOutParam);
+    juce::SharedResourcePointer<Fm1Live> link;
+    link->setEnabled(true);
+    for (int i = 0; i < 100 && !link->isLive(); ++i) juce::Thread::sleep(50);
+    link->setClockOut(true);
+    for (int i = 0; i < 40 && !link->clockOut(); ++i) juce::Thread::sleep(50);
+    const int syncOn = read(Fm1Live::kSyncParam), clkOn = read(Fm1Live::kClockOutParam);
+
+    std::atomic<int> pulses { 0 };
+    {
+        Fm1Connection fm; juce::String err;
+        fm.onMidi = [&pulses](const juce::MidiMessage& m) { if (m.getRawDataSize() == 1 && m.getRawData()[0] == 0xF8) ++pulses; };
+        if (fm.open(err)) { pulses = 0; juce::Thread::sleep(1000); }
+    }
+    const int seen = pulses.load();
+    link->setClockOut(false);
+    for (int i = 0; i < 40 && link->clockOut(); ++i) juce::Thread::sleep(50);
+    link->setEnabled(false);
+    const int syncAfter = read(Fm1Live::kSyncParam), clkAfter = read(Fm1Live::kClockOutParam);
+    std::printf("[SYNC]  antes %d, en fm-1 -> fl %d, después %d   (0 INT, 1 USB, 2 TRS)\n", syncBefore, syncOn, syncAfter);
+    std::printf("[CLOCK] antes %d, en fm-1 -> fl %d, después %d\n", clkBefore, clkOn, clkAfter);
+    std::printf("[pulsos] %d en 1 s (24 por tiempo: a 120 BPM = 48)\n", seen);
+    const bool ok = syncOn == 0 && clkOn == 1 && seen > 10 && syncAfter == syncBefore && clkAfter == clkBefore;
+    std::printf("%s\n", ok ? "RELOJ FM-1 OK" : "RELOJ FM-1 REVISAR");
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char** argv)
 {
+    if (argc > 1 && juce::String(argv[1]) == "maestro")
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        return clockOutTest();
+    }
+    if (argc > 1 && juce::String(argv[1]) == "teclas")
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        return keysTest(argc > 2 ? juce::jmax(1, juce::String(argv[2]).getIntValue()) : 30);
+    }
+    if (argc > 1 && juce::String(argv[1]) == "remoto")
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        return remoteTest();
+    }
+    if (argc > 1 && juce::String(argv[1]) == "sonidovivo")
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        return soundWriteTest();
+    }
+    if (argc > 1 && juce::String(argv[1]) == "sonido")
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        return soundRead(argc > 2 ? juce::jlimit(0, 3, juce::String(argv[2]).getIntValue()) : -1);
+    }
     if (argc > 1 && juce::String(argv[1]) == "puente")
     {
         juce::ScopedJuceInitialiser_GUI gui;

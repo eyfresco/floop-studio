@@ -4,6 +4,7 @@
 #include "SeqEngine.h"
 #include "Fm1Protocol.h"
 #include "ClockEngine.h"
+#include "SoundModel.h"
 #include <cstdio>
 #include <vector>
 
@@ -187,11 +188,32 @@ int main()
         Session b;
         CHECK(b.deserialise(a.serialise()));
         CHECK(b.laneLevel(2, 3) == LvHard && b.laneRoll(2, 3) == 2);
-        std::string v1 = a.serialise();
-        v1 = "SLOOP1" + v1.substr(6, v1.size() - 6 - kSteps * 16);   // drop the SLOOP2 tail
+        // a prototype-1 state: 16 steps, no levels / rolls (built by hand, as the old format wrote it)
+        auto hex = [](uint64_t v, int digits) { std::string o; static const char* d = "0123456789abcdef";
+                                                for (int i = digits - 1; i >= 0; --i) o += d[(v >> (i * 4)) & 15u]; return o; };
+        std::string v1 = "SLOOP1";
+        for (int st = 0; st < 16; ++st) v1 += hex(a.drum[st].load(), 4);
+        for (int l = 0; l < kLanes; ++l) v1 += hex(a.laneNote[l].load(), 2);
+        for (int t = 1; t < kTracks; ++t) for (int st = 0; st < 16; ++st) v1 += hex(a.notesLo[t][st].load(), 16) + hex(a.notesHi[t][st].load(), 16);
+        for (int t = 0; t < kTracks; ++t) v1 += hex(a.channel[t], 2) + hex(a.muted[t], 2) + hex(a.length[t], 2) + hex(a.gate[t], 2) + hex(a.velocity[t], 2);
+        v1 += hex((uint64_t) a.selected.load(), 2);
         Session c;
         CHECK(c.deserialise(v1));
         CHECK(c.drumOn(2, 3) && c.laneLevel(2, 3) == LvNorm && c.laneRoll(2, 3) == 0);
+    }
+    {   // 64 steps: a 32-step track plays its 32 steps, then loops; the state keeps step 64
+        Session s; SeqEngine e;
+        s.length[0] = 32;
+        s.setDrum(0, 0, true); s.setDrum(31, 2, true); s.setDrum(63, 4, true);
+        auto ev = run(s, e, 0.0, 1, 6000 * 64);   // 64 steps
+        CHECK(countOn(ev, 36) == 2 && countOn(ev, 38) == 2 && countOn(ev, 42) == 0);
+        s.length[0] = 64;
+        SeqEngine e2;
+        auto ev2 = run(s, e2, 0.0, 1, 6000 * 64);
+        CHECK(countOn(ev2, 36) == 1 && countOn(ev2, 38) == 1 && countOn(ev2, 42) == 1);
+        Session b;
+        CHECK(b.deserialise(s.serialise()) && b.drumOn(63, 4) && b.length[0] == 64);
+        CHECK(Session().length[0] == kDefaultLength);
     }
     {   // the FM-1 protocol: frames, v14, INFO, DRUM_STEP, TRACK_STEP, TRACK_PARAM
         using namespace sloop::fm1;
@@ -306,6 +328,44 @@ int main()
         auto s = parseLive(a);
         CHECK(s && s->playing && s->songMode && !s->recWaiting && s->recTracks == 2 && s->bpm == 128 && s->selected == 3);
         CHECK(!parseLive(std::vector<uint8_t>(5, 0)));
+    }
+
+    {   // SONIDO: DESC / DUMP / NAMES / UP_LIST, and values in the FM-1's units
+        using namespace sloop::snd;
+        auto v14b = [](std::vector<uint8_t>& b, int v) { const int x = v + 8192; b.push_back((uint8_t) (x & 127)); b.push_back((uint8_t) (x >> 7)); };
+        std::vector<uint8_t> d { 0, (uint8_t) P_VOICE, F_ENUM };
+        v14b(d, 0); v14b(d, 3); v14b(d, 0);
+        for (const char* str : { "VCE", "", "POLY", "MONO", "LEGATO", "UNISON" }) { for (const char* c = str; *c; ++c) d.push_back((uint8_t) *c); d.push_back(0); }
+        auto desc = parseDesc(d);
+        CHECK(desc && desc->id == P_VOICE && desc->label == "VCE" && desc->max == 3 && desc->names.size() == 4);
+        CHECK(desc && formatValue(*desc, 1) == "MONO");
+
+        std::vector<uint8_t> dump { 2, 5 };
+        for (int i = 0; i < P_COUNT; ++i) v14b(dump, i == P_PAN ? -10 : i);
+        for (int i = 0; i < 45; ++i) v14b(dump, i * 2);
+        auto du = parseDump(dump, P_COUNT, 45);
+        CHECK(du && du->engine == 2 && du->preset == 5 && du->params[(size_t) P_PAN] == -10 && du->params[(size_t) P_E0] == P_E0
+              && du->globals.size() == 45 && du->globals[(size_t) G_DRLVL] == 50);
+
+        std::vector<uint8_t> nm { 0, 2 };
+        for (const char* str : { "INIT", "SUPERSAW", "OSC", "FILTER" }) { for (const char* c = str; *c; ++c) nm.push_back((uint8_t) *c); nm.push_back(0); }
+        auto names = parseNames(nm);
+        CHECK(names && names->presets.size() == 2 && names->presets[1] == "SUPERSAW" && names->edit1 == "OSC" && names->edit2 == "FILTER");
+
+        std::vector<uint8_t> ul { 0, 2, 32, 1, 3 };
+        for (const char* c = "MI BAJO"; *c; ++c) ul.push_back((uint8_t) *c);
+        ul.push_back(0); ul.push_back(0); ul.push_back(0); ul.push_back(0);
+        int total = 0;
+        auto up = parseUserList(ul, total);
+        CHECK(up && total == 32 && up->size() == 2 && (*up)[0].used && (*up)[0].name == "MI BAJO" && (*up)[0].engine == 3 && !(*up)[1].used);
+
+        Desc t; t.fmt = F_TIME;   CHECK(formatValue(t, 0) == "1.0 ms" && formatValue(t, 127) == "10.0 s");
+        Desc h; h.fmt = F_LFOHZ;  CHECK(formatValue(h, 0) == "0.05 Hz" && formatValue(h, 127) == "40.0 Hz");
+        Desc c; c.fmt = F_CUTOFF; CHECK(formatValue(c, 0) == "30 Hz" && formatValue(c, 127) == "16 kHz");
+        Desc db; db.fmt = F_DB;   CHECK(formatValue(db, 0) == "OFF" && formatValue(db, 112) == "0.0 dB" && formatValue(db, 96) == "-8.0 dB");
+        Desc f; f.fmt = F_FILT;   CHECK(formatValue(f, 0) == "OFF" && formatValue(f, -64) == "LP 100 %" && formatValue(f, 63) == "HP 100 %");
+        Desc pc; pc.fmt = F_PCT; pc.max = 127; CHECK(formatValue(pc, 127) == "100 %");
+        CHECK(synthPages().size() == 18 && drumPages().size() == 6);
     }
 
     std::printf(failures ? "%d FAILED\n" : "all core tests passed\n", failures);

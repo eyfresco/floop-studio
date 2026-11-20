@@ -9,7 +9,7 @@ namespace {
 bool looksLikeFm1(const juce::String& n)
 {
     const auto s = n.toLowerCase();
-    if (s.contains("studio")) return false;   // our own "SLOOP Studio" MIDI source (VirtualMidiSource), not the FM-1
+    if (s.contains("studio")) return false;   // our own "Floop Studio" MIDI source (VirtualMidiSource), not the FM-1
     return s.contains("felucca") || s.contains("sloop") || s.contains("fm-1") || s.contains("fm1");
 }
 
@@ -49,6 +49,9 @@ bool Fm1Connection::open(juce::String& error)
     }
     name = inInfo.name;
     in->start();
+    // The first frame after opening the ports can be lost (sloop-fm1 tools/fm1_sample_upload.py
+    // does the same): a few PINGs until the FM-1 answers, so the caller's first request is not the one lost.
+    for (int i = 0; i < 3 && !request(fm1::PING, {}, 300, false); ++i) {}
     return true;
 }
 
@@ -100,7 +103,7 @@ std::vector<Fm1Connection::Push> Fm1Connection::takePushes()
 
 void Fm1Connection::handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& m)
 {
-    if (!m.isSysEx()) return;
+    if (!m.isSysEx()) { if (onMidi) onMidi(m); return; }
     auto frame = fm1::parseFrame(m.getSysExData(), (size_t) m.getSysExDataSize());
     if (!frame) return;
     const juce::ScopedLock sl(lock);
@@ -218,7 +221,7 @@ bool readTrackParams(Fm1Connection& fm, Fm1Pattern& p)
         const auto mute = fm.request(fm1::TRACK_PARAM, { (uint8_t) dev, (uint8_t) fm1::P_MUTE });
         const auto muteV = mute ? fm1::parseTrackParam(*mute, dev, fm1::P_MUTE) : std::nullopt;
         if (!lenV || !muteV) return false;
-        p.length[t] = juce::jlimit(1, kSteps, *lenV);   // the plugin shows the first 16 steps
+        p.length[t] = juce::jlimit(1, kSteps, *lenV);   // (SLOOP: up to 64)
         p.muted[t] = *muteV ? 1 : 0;
     }
     return true;
@@ -226,26 +229,28 @@ bool readTrackParams(Fm1Connection& fm, Fm1Pattern& p)
 
 bool readPattern(Fm1Connection& fm, int steps, Fm1Pattern& p, juce::String& error)
 {
+    // The lengths first: each track is read up to its own length (a 16-step track costs 16 reads
+    // of the 64 the FM-1 holds; steps past it keep what the caller's pattern had for them).
+    if (!readTrackParams(fm, p))
+    {
+        error = juce::String::fromUTF8("Se cortó la lectura del largo de las pistas.");
+        return false;
+    }
     steps = juce::jlimit(0, kSteps, steps);
     p.ties = 0;
-    for (int s = 0; s < steps; ++s)
+    for (int s = 0; s < juce::jmin(steps, p.length[kDrums]); ++s)
         if (!readDrumStep(fm, s, p))
         {
             error = juce::String::fromUTF8("Se cortó la lectura en DRUMS, paso ") + juce::String(s + 1) + ".";
             return false;
         }
     for (int t = 1; t < kTracks; ++t)
-        for (int s = 0; s < steps; ++s)
+        for (int s = 0; s < juce::jmin(steps, p.length[t]); ++s)
             if (!readSynthStep(fm, t, s, p))
             {
                 error = juce::String::fromUTF8("Se cortó la lectura en ") + kTrackNames[t] + ", paso " + juce::String(s + 1) + ".";
                 return false;
             }
-    if (!readTrackParams(fm, p))
-    {
-        error = juce::String::fromUTF8("Se cortó la lectura del largo de las pistas.");
-        return false;
-    }
     return true;
 }
 

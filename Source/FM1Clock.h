@@ -3,7 +3,7 @@
 // its own connection to the FM-1. Switching it on also sets the FM-1's GLO > SYSTEM > SYNC to USB
 // (and puts the old value back when it is switched off).
 //
-// One clock for the whole process (juce::SharedResourcePointer). Every SLOOP Studio instance
+// One clock for the whole process (juce::SharedResourcePointer). Every Floop Studio instance
 // publishes FL's transport from its audio thread; they all see the same transport.
 #pragma once
 #include "FM1Import.h"

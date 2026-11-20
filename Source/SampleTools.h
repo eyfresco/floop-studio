@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The FM-1's user sample slots from SLOOP Studio: audio files -> a slot (SampleSlot.h), the slots'
+// The FM-1's user sample slots from Floop Studio: audio files -> a slot (SampleSlot.h), the slots'
 // contents (SMP_INFO), the upload (SMP_BEGIN / SMP_WRITE / SMP_END, as sloop-fm1
 // tools/fm1_sample_upload.py) and, for a drum kit, KIT = USRn on the drum track.
 #pragma once

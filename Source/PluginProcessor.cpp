@@ -8,7 +8,7 @@ SloopProcessor::SloopProcessor()
     : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
     for (auto& s : playStep) s = -1;
-    sloop::VirtualMidiSource::get();   // the "SLOOP Studio" MIDI port exists as soon as the plugin is loaded
+    sloop::VirtualMidiSource::get();   // the "Floop Studio" MIDI port exists as soon as the plugin is loaded
 }
 
 void SloopProcessor::prepareToPlay(double sampleRate, int)

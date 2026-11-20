@@ -1,118 +1,206 @@
-# SLOOP Studio — FL Edition (prototipo 1)
+# Floop Studio — by @HeyFresco
 
-Secuenciador de 4 pistas y controlador MIDI para FL Studio, inspirado en SLOOP para el FM-1.
-**No produce sonido**: manda notas MIDI a los instrumentos de FL que elijas (FPC, FLEX, Serum, otros VST).
-El FM-1 es opcional y funciona como teclado y controlador físico.
+**Español** · [English](README.en.md) · [Português](README.pt.md)
 
-![DRUMS](docs/ui-drums.png)
+Floop Studio es un plugin para **FL Studio** (VST3 / AU, macOS) con dos partes:
+
+- Un **secuenciador MIDI de 4 pistas**: synth 1, synth 2, synth 3 y drums, de hasta 64 pasos.
+- Un **editor y controlador en vivo del M-VAVE FM-1** con el firmware [SLOOP](https://github.com/isod89/sloop-fm1).
+
+**No produce sonido.** Manda notas MIDI a los instrumentos de FL que elijas (Serum, Surge XT, Vital, Kontakt…). El FM-1 es opcional: sirve como teclado, como controlador y como segunda groovebox sincronizada.
+
+Es mi primer plugin. Sígueme en Instagram [@heyfresco](https://instagram.com/heyfresco) y en X [@heyfresco](https://x.com/heyfresco).
+
+![patrón · drums](docs/ui-drums.png)
+
+## Contenido
+
+- [La ventana](#la-ventana)
+- [patrón: el secuenciador](#patrón-el-secuenciador)
+- [fm-1 vivo: el enlace con el FM-1](#fm-1-vivo-el-enlace-con-el-fm-1)
+- [reloj, play y rec](#reloj-play-y-rec)
+- [sonido](#sonido)
+- [samples](#samples)
+- [mapa midi](#mapa-midi)
+- [créditos](#créditos)
+- [Instalar](#instalar)
+- [Conectarlo en FL Studio](#conectarlo-en-fl-studio)
+- [Grabar el audio del FM-1 en FL](#grabar-el-audio-del-fm-1-en-fl)
+- [Qué está probado](#qué-está-probado)
+- [Licencia](#licencia)
+
+## La ventana
+
+La ventana mide 860×520 y sigue el estilo del SLOOP Editor. Está ordenada en filas:
+
+1. **Cabecera:**
+   - el nombre y las luces `fl` (transporte de FL) y `midi` (llegan notas);
+   - **reloj**, **fm-1 vivo**, **▶ fm-1**, **rec**;
+   - **salida**: qué pistas manda esta instancia.
+2. **Pistas:** synth 1, synth 2, synth 3 y **drums como la 4.ª**, igual que en el FM-1. Cada una muestra su canal, sus pasos y su mute (`m`).
+3. **Pestañas:** `patrón · sonido · samples · mapa midi · créditos`. A la derecha se ve el estado del FM-1.
+
+## patrón: el secuenciador
 
 | Pista | Qué hace | Canal MIDI por defecto |
 |---|---|---|
-| DRUMS | 16 sonidos × 16 pasos (el orden de carriles de SLOOP: kick, kick 2, snare, clap, hat…) en notas GM | 10 |
-| SYNTH 1–3 | Cuadrícula de 2 octavas × 16 pasos, acordes permitidos, OCT −/+ para moverte | 1, 2, 3 |
+| synth 1–3 | Cuadrícula de 2 octavas × hasta 64 pasos, con acordes, y `octava −/+` para moverte | 1, 2, 3 |
+| drums | 16 sonidos × hasta 64 pasos, en el orden de carriles de SLOOP (kick, kick 2, snare, clap, hat…), en notas GM | 10 |
 
-Por pista: **PASOS** (1–16, patrones de largo distinto se desfasan como polirritmo), **GATE**, **VELOCIDAD**, **CANAL MIDI**, **M** (mute) y **LIMPIAR**.
-Los pasos siguen la posición de FL (1 paso = semicorchea), así que siempre caen en la rejilla, también después de un loop, un salto o un cambio de tempo.
+![patrón · synth 1](docs/ui-synth1.png)
 
-### Niveles y roll en DRUMS (como en el FM-1)
+- **Ajustes por pista:** `pasos` (1–64), `gate`, `vel`, `ch` y `limpiar`.
+- **Polirritmos:** las pistas de largo distinto se desfasan entre sí.
+- **Sincronía:** los pasos siguen la posición de FL (1 paso = semicorchea), así que siempre caen en la rejilla, también después de un loop, un salto o un cambio de tempo.
 
-- **Clic:** pone o quita un golpe (nuevo = NORM, x1).
-- **Shift+clic** en un golpe: un nivel más fuerte, GHOST → SOFT → NORM → HARD. Se ve por la intensidad del color; HARD lleva borde blanco. Velocidades: GHOST 35, SOFT 70, NORM = VELOCIDAD de la pista, HARD 127.
-- **Alt+clic** en un golpe: roll x1 → x2 → x3 → x4 (golpes repartidos dentro del paso; se ve dividido).
+### 64 pasos: páginas y vista completa
 
-### FM-1 en vivo (como el SLOOP Editor)
+![64 pasos, página 49–64](docs/ui-64.png)
 
-El botón **FM-1 EN VIVO** (arriba) conecta SLOOP Studio con el FM-1 por USB y los mantiene sincronizados con el mismo protocolo SysEx que usa el SLOOP Editor web:
+- **1–16 · 17–32 · 33–48 · 49–64:** cambian la página que ves.
+  - Las páginas que pasan del largo de la pista se ven atenuadas.
+  - La página donde va el cursor se resalta en el color de la pista.
+- **todo:** muestra los 64 pasos a la vez, con una línea entre compases. También se puede pintar ahí.
 
-- **Al conectar**, SLOOP Studio toma el patrón que tiene el FM-1: los golpes de DRUMS con nivel y roll, las notas de SYNTH 1–3, y el largo y el mute de cada pista. Si ya tenías algo pintado, pide confirmación antes.
-- **Plugin → FM-1:** cada cambio que hagas aquí se escribe en el FM-1 al momento.
-- **FM-1 → plugin:**
-  - Lo que cambies en el equipo (grabar, borrar, editar pasos, cargar un proyecto) aparece aquí.
-  - La pista que el FM-1 tiene seleccionada se actualiza al instante.
-  - Las otras se releen cada 2,5 s, porque el FM-1 solo avisa de la pista seleccionada.
-- **La pista seleccionada también se sincroniza**, como en el SLOOP Editor: elegir una pestaña aquí la selecciona en el FM-1, y elegir una pista en el FM-1 cambia la pestaña aquí. Al conectar, el plugin toma la que tiene el FM-1.
-- Si los dos cambian el mismo paso a la vez, gana el plugin.
-- El estado se ve en verde/amarillo/rojo sobre la cuadrícula. Si se desconecta, reintenta cada 2 s.
-- El enlace es uno solo para todas las instancias de SLOOP Studio y sigue activo aunque cierres la ventana del plugin.
+![64 pasos, vista completa](docs/ui-64-todo.png)
 
-Límites del FM-1 en este modo:
-- Máximo **4 notas por paso** en los synths; la 5.ª se rechaza con un aviso.
+Los proyectos guardados con 16 pasos se abren igual. Los nuevos guardan los 64.
+
+### Niveles y roll en drums
+
+Sobre la cuadrícula de drums hay dos pinceles, como en el SLOOP Editor:
+
+- **nivel:** ghost (vel 35), soft (70), norm (la `vel` de la pista) y hard (127).
+- **roll:** x1–x4.
+
+Para pintar:
+
+- **Clic:** pone un golpe con el pincel elegido. Hacer clic otra vez en el mismo golpe lo quita.
+- **Arrastrar:** pinta o borra varios golpes seguidos.
+- **Shift+clic:** sube el golpe un nivel.
+
+La intensidad del color indica el nivel (hard lleva borde) y las divisiones indican el roll.
+
+## fm-1 vivo: el enlace con el FM-1
+
+**fm-1 vivo** conecta el plugin con el FM-1 por USB. Usa el mismo protocolo SysEx que el SLOOP Editor web.
+
+- **Al conectar:** el plugin toma el patrón del FM-1, con golpes, niveles, roll, notas, largo y mute de cada pista. Si ya tenías algo pintado, primero te pide confirmación.
+- **Del plugin al FM-1:** cada cambio se escribe en el equipo al momento.
+- **Del FM-1 al plugin:** lo que grabes, borres o cargues en el FM-1 aparece aquí.
+  - La pista seleccionada se actualiza al instante.
+  - Las demás se releen cada 2,5 s.
+- **Pista seleccionada:** elegir una pista aquí la selecciona en el FM-1, y al revés.
+- **Conflictos:** si los dos cambian el mismo paso a la vez, gana el plugin.
+- **Si se cae la conexión:** el enlace reintenta cada 2 s.
+- **Varias instancias:** comparten un solo enlace, que sigue activo aunque cierres la ventana.
+
+**Límites del FM-1:**
+
+- En los synths caben 4 notas por paso.
 - Las notas ligadas (TIE) aún no se muestran.
-- Se sincronizan los primeros 16 pasos.
-- Al escribir un paso de synth desde aquí, sus acentos, slides y niveles por nota quedan en NORM.
+- Al escribir un paso de synth desde aquí, sus acentos y slides quedan en NORM.
 
-Dos secuenciadores, un patrón: el FM-1 sigue tocando su patrón con su sonido, y SLOOP Studio toca el mismo patrón por MIDI hacia tus instrumentos de FL. Usa uno, el otro o ambos (para ambos, falta mandar el reloj de FL al FM-1: pendiente).
+## reloj, play y rec
 
-Para probarlo sin FL:
-- `build/sloop_fm1_probe_artefacts/Release/sloop_fm1_probe` lee el FM-1 una vez.
-- `... sloop_fm1_probe vivo 30` muestra en la terminal, durante 30 s, cada cambio que hagas en el equipo. Solo escucha: no escribe nada en el FM-1.
+El selector **reloj** decide quién manda el tempo. Al cambiar de opción, el FM-1 vuelve a sus ajustes de antes.
 
-### SYNC FL, ▶ FM-1 y REC
+| reloj | Qué pasa |
+|---|---|
+| **libre** | Cada uno con su tempo. |
+| **fl → fm-1** | FL manda su reloj y su PLAY/STOP al FM-1. El plugin pone SYNC = USB en el FM-1, y el FM-1 entra en la siguiente barra de compás de FL. |
+| **fm-1 → fl** | El FM-1 manda su tempo, START y STOP a FL. El plugin pone en el FM-1 SYNC = INT y CLOCK = ON. En FL hay que activar *Options → MIDI Settings → External sync = MIDI clock*, con la entrada *Felucca* activada. |
 
-- **SYNC FL:** manda el tempo y el PLAY/STOP de FL al FM-1 como reloj MIDI, y pone **SYNC = USB** en el FM-1 sin tocar el equipo. Al apagarlo, detiene el FM-1 y devuelve SYNC a como estaba. No hace falta activar *Send master sync* en FL.
-  - Con FL parado, el FM-1 sigue el tempo pero no avanza.
-  - Con PLAY en FL, el FM-1 arranca **en la primera barra de compás**: al instante si FL empieza en una, o en la siguiente (aviso *FM-1 entra en el próximo compás*). SLOOP no entiende posiciones de canción, solo START desde su inicio.
-  - Si FL vuelve atrás en un loop, el FM-1 se reinicia con él.
-  - Funciona aunque FM-1 EN VIVO esté apagado.
-- **▶ FM-1** (con FM-1 EN VIVO): el PLAY/STOP del FM-1, como su botón. Un plugin no puede arrancar el transporte de FL; para eso está el PLAY de FL con SYNC FL.
-- **REC:**
-  - Con FM-1 EN VIVO es el REC del FM-1, como su botón, y se ilumina con el estado del equipo. Si el FM-1 está tocando su canción (modo canción), no deja grabar y el plugin lo avisa.
-  - Sin enlace graba en SLOOP Studio lo que tocas en el FM-1, como antes.
+- **▶ fm-1:** es el PLAY/STOP del FM-1, como su botón.
+- **rec:**
+  - Con fm-1 vivo, es el REC del FM-1 y se ilumina según el estado del equipo.
+  - Sin enlace, graba en el plugin lo que tocas en el FM-1.
 
-### El PLAY del FM-1 controla FL (y al revés)
+### El play del FM-1 arranca FL
 
-- **FL → FM-1:** con **SYNC FL**, el PLAY y STOP de FL arrancan y detienen el FM-1.
-- **FM-1 → FL:** con **FM-1 EN VIVO** y **PLAY del FM-1 → FL** activados (abajo, en PATRÓN), el PLAY y STOP del FM-1 arrancan y detienen FL.
-  - Un plugin no puede mover el transporte de FL, así que lo hace un **script de controlador** de FL: el plugin crea un puerto MIDI virtual **"SLOOP Studio"** y por él manda CC 118 (play) / CC 119 (stop) en el canal 16.
-  - Solo avisa cuando el FM-1 cambió por su cuenta: si FL ya está así (su propio PLAY lo arrancó), no manda nada, así que no hay eco.
+En `patrón`, el interruptor **play fm-1 → fl** hace que el PLAY y STOP del FM-1 arranquen y detengan FL. Un plugin no puede mover el transporte de FL, así que esto lo hace un script de controlador:
 
-Configurarlo una vez en FL:
-1. El script ya está instalado en `Documentos/Image-Line/FL Studio/Settings/Hardware/SLOOP Studio/device_SLOOP_Studio.py` (copia en `Scripts/FL/`).
-2. Con SLOOP Studio cargado, ve a **Options → MIDI Settings → Input**: selecciona **SLOOP Studio**, en *Controller type* elige **SLOOP Studio** y pulsa **Enable**. Si no aparece, usa *Rescan devices*.
-3. Activa **SYNC FL** para que el FM-1 vuelva a alinearse con el compás de FL.
+1. Copia `Scripts/FL/device_Floop_Studio.py` a `Settings/Hardware/Floop Studio/`, dentro de la carpeta de datos de usuario de FL.
+2. Con Floop Studio cargado, ve a **Options → MIDI Settings → Input**:
+   - selecciona el puerto **Floop Studio**;
+   - en *Controller type* elige **Floop Studio**;
+   - pulsa **Enable**.
 
-Límites:
-- FL arranca hasta ~¼ s después, porque el plugin lee el estado del FM-1 4 veces por segundo.
-- El FM-1 empieza en cuanto pulsas su PLAY y, con SYNC FL, se realinea al compás de FL al arrancar este.
+El plugin manda CC 118 (play) y CC 119 (stop) por el canal 16. Si FL ya está en ese estado, no manda nada, así que no hay eco.
 
-### SONIDOS: samples y kits para el FM-1 (USR1–USR4)
+## sonido
 
-La pestaña **SONIDOS** (junto a PATRÓN) hace lo mismo que las páginas *Samples* y *Drum kit* del SLOOP Editor: lleva tus sonidos a los 4 espacios del FM-1, de unos 7,4 s cada uno.
+Es la página *Sound* del SLOOP Editor para la pista seleccionada. Necesita fm-1 vivo.
 
-![SONIDOS](docs/ui-sonidos.png)
+![sonido](docs/ui-sonido.png)
 
-- **INSTRUMENTO:** hasta 16 archivos (WAV, AIFF, MP3, FLAC…). Cada uno suena en su nota y las teclas de en medio tocan el más cercano.
-  - La nota se toma del nombre (`PIANO_C4.wav`) o se ajusta con − / + (Shift: una octava).
-  - En el FM-1: una pista de synth con el motor SAMPLE y SET = USRn.
-- **KIT DE BATERÍA:** 16 pads, uno por tecla blanca (KICK en F3 … COWBELL en G5).
-  - Si sueltas varios archivos, se reparten por su nombre (kick, bd, snare, hh, open, crash…).
-  - Si el kit no cabe, los sonidos más largos se recortan con un fundido corto.
-  - Con *Usar en DRUMS al enviar*, la pista DRUMS pasa a tocar KIT = USRn.
-- **ENVIAR A USRn:** borra ese espacio en el FM-1 y sube los sonidos. Antes muestra qué hay en ese espacio y pide confirmación.
-  - **LEER FM-1** actualiza la lista de lo que hay en cada espacio (solo lectura).
-  - Mientras sube, el enlace en vivo se pausa y luego sigue solo.
-- El formato es el de SLOOP, byte por byte: mono, 22050 Hz, IMA ADPCM. `sloop_sample_tests` lo compara con la salida del propio `sampleio.py` de SLOOP.
+- **motor y preset:** los 12 motores de SLOOP y sus presets de fábrica.
+- **Páginas de perillas:**
+  - las dos del motor;
+  - ENV, ENV DEST, LFO, LFO 2, LFO DEST, FX, FILTER, INSERT, SLICER, VOICE, ARP y SEL.
+  - Los valores se muestran como en el equipo (ms, Hz, dB, %, nombres).
+- **Cómo usar las perillas:**
+  - arrastra arriba o abajo (con Shift, el ajuste es fino);
+  - la rueda mueve un paso;
+  - el doble clic vuelve al valor por defecto.
+  - Los cambios van y vienen del FM-1 al instante.
+- **drums:** kit (incluye USR1–4), paneo, nivel, reverb y delay globales, filtro, insert y slicer.
+- **usuario:** los 32 presets de usuario del FM-1, con *cargar* y *guardar…*.
 
-## Grabar el audio del FM-1 en FL
+## samples
 
-Por USB, el FM-1 también es una **entrada de audio** (*Felucca*, estéreo, 44,1 o 48 kHz, sin driver):
+Hace lo mismo que las páginas *Samples* y *Drum kit* del SLOOP Editor: sube tus sonidos a los 4 espacios del FM-1 (USR1–USR4, unos 7,4 s cada uno).
 
-1. **Configuración de Audio MIDI** (Mac): crea un **Dispositivo agregado** con *Felucca* (entrada) y tus parlantes o interfaz (salida). En Mac, FL usa un solo dispositivo de audio para entrada y salida, y el FM-1 solo tiene entrada.
-2. **FL → Options → Audio Settings:** elige ese dispositivo agregado.
-3. **Mixer:** en un insert libre, elige la entrada *Felucca*, arma la grabación, dale REC en FL y toca.
+![samples](docs/ui-sonidos.png)
 
-Con **SYNC FL** activado, el FM-1 toca a tiempo con FL, así que lo grabado cae en su lugar. Puede haber unos milisegundos de retraso por USB: mueve el clip o usa la compensación de latencia de FL.
+- **instrumento:** hasta 16 archivos (WAV, AIFF, MP3, FLAC…), cada uno en su nota.
+  - La nota se toma del nombre del archivo (`PIANO_C4.wav`) o se ajusta con −/+.
+- **kit de batería:** 16 pads, de KICK en F3 a COWBELL en G5.
+  - Si sueltas varios archivos a la vez, se reparten según su nombre.
+  - Si no caben, los sonidos más largos se recortan con un fundido.
+- **enviar a USRn:** antes de borrar ese espacio, te muestra qué tiene y pide confirmación.
+
+El formato es el de SLOOP byte por byte: mono, 22050 Hz, IMA ADPCM.
+
+## mapa midi
+
+El FM-1 dibujado con su acomodo real, el del manual de M-VAVE. Muestra el MIDI de cada control con SLOOP. Al pasar el mouse por encima, explica qué hace cada uno.
+
+![mapa midi](docs/ui-mapa.png)
+
+| Control | MIDI |
+|---|---|
+| 27 teclas | 53–79 en octava 0 (la referencia para FX CH). Al tocar, el FM-1 envía la nota que suena, que se mueve con OCT y transpose. |
+| 14 botones (REMOTE) | CC 102 FX · 103 SEL · 104 ENV · 105 LFO · 106 EDIT · 107 GLO · 108 HOME · 109 SAVE · 110 ARP · 111 SEQ · 112 PLAY · 113 REC · 114 OCT− · 115 OCT+ |
+| Perillas | No envían MIDI con SLOOP. La pestaña sonido ve sus cambios. |
+
+- **remote:** activa REMOTE en el FM-1 por el canal 16. Con remote activo:
+  - hacer clic en un botón del dibujo lo pulsa en el FM-1;
+  - mantener el clic mantiene el botón pulsado, así que también funcionan las capas.
+- **Clic en una tecla:** la toca en el FM-1.
+- **Tocar en el FM-1:** las teclas se iluminan en el dibujo, y arriba se ven la última nota y su canal.
+
+## créditos
+
+![créditos](docs/ui-creditos.png)
+
+- **@HeyFresco** ([Instagram](https://instagram.com/heyfresco) · [X](https://x.com/heyfresco)): creador de Floop Studio (idea, dirección, diseño y pruebas con el FM-1).
+- **[SLOOP](https://github.com/isod89/sloop-fm1):** de isod89 y su comunidad (GPL-3.0). Floop Studio usa su protocolo, su formato de samples y el diseño del SLOOP Editor.
+- **[Felucca](https://github.com/hugelton/Felucca):** de Leo Kuroshita / Hügelton Instruments, la base de SLOOP.
+- **[JUCE 8](https://juce.com):** el framework del plugin.
 
 ## Instalar
 
-Ya está compilado e instalado en esta Mac:
+1. Copia los plugins compilados a tu carpeta de plugins:
+   - `Floop Studio.vst3` → `~/Library/Audio/Plug-Ins/VST3/`
+   - `Floop Studio.component` → `~/Library/Audio/Plug-Ins/Components/`
+2. En FL Studio, ve a **Options → Manage plugins → Find installed plugins**. Aparece como el generador **Floop Studio**.
 
-- `~/Library/Audio/Plug-Ins/VST3/SLOOP Studio.vst3`
-- `~/Library/Audio/Plug-Ins/Components/SLOOP Studio.component` (AU)
+Para compilar necesitas CMake y las Command Line Tools de Xcode. La primera vez, descarga JUCE:
 
-En FL Studio: **Options → Manage plugins → Find installed plugins** (o *Find more plugins*). Aparece como generador **SLOOP Studio**.
-
-Para recompilar después de un cambio:
+```bash
+git clone --depth 1 --branch 8.0.15 https://github.com/juce-framework/JUCE external/JUCE
+```
 
 ```bash
 cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
@@ -122,83 +210,73 @@ cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j8
 ```
 
-(La primera vez necesita JUCE en `external/JUCE`: `git clone --depth 1 --branch 8.0.15 https://github.com/juce-framework/JUCE external/JUCE`.)
+Al compilar, los plugins se copian solos a esas carpetas.
 
 ## Conectarlo en FL Studio
 
-FL da **un solo puerto MIDI de salida por plugin**, y el instrumento que escucha ese puerto recibe todos los canales.
-Por eso hay dos maneras de usarlo:
+FL da **un puerto MIDI de salida por plugin**. Los instrumentos nativos de FL (FPC, FLEX…) no tienen puerto de entrada MIDI, así que el plugin funciona directo con VST, AU y CLAP. Para FPC o FLEX se usa Patcher, pero eso aún no está probado.
 
-> **Probado en FL Studio 2026 (Mac), 16 nov 2026:** SLOOP Studio (VST3) → **Surge XT** por el puerto 0 suena y sigue el transporte; mutear DRUMS en el plugin silencia la salida.
-> Los instrumentos **nativos** de FL (FPC, FLEX, 3x Osc…) **no tienen puerto de entrada MIDI**: el enrutamiento por puertos solo llega a plugins VST/AU/CLAP (Serum, Surge XT, Vital, Kontakt…).
-> Para FPC o FLEX hay que usar **Patcher** (cablear la salida MIDI de SLOOP Studio a FPC dentro de Patcher). Eso **aún no está probado**.
+**Una instancia → un instrumento:**
 
-### A. Una instancia → un instrumento VST (para empezar)
+1. Agrega **Floop Studio** al Channel Rack.
+2. Abre la configuración del plugin (el engrane) y, en la sección MIDI, pon **Output port = 0**.
+3. Agrega un instrumento VST (Surge XT, Serum…) y pon su **Input port = 0**.
+4. Pinta un patrón y dale Play en FL.
 
-1. Agrega **SLOOP Studio** al Channel Rack.
-2. Abre el engrane del wrapper → pestaña de ajustes → sección MIDI → **Output port**. Gira la rueda del mouse sobre el campo: pasa de `---` a `0`.
-3. Agrega un instrumento VST/AU/CLAP (p. ej. Surge XT, Serum). En su wrapper, **Input port = 0** (el mismo número).
-4. Pinta un ritmo en DRUMS y dale **Play** en FL.
+**Cada pista a su instrumento:** todas las instancias comparten el mismo patrón. En cada instancia, elige qué pista manda con **salida** y dale un puerto propio:
 
-### B. Cada pista a un instrumento distinto
-
-Todas las instancias de SLOOP Studio **comparten el mismo patrón**: edites en la que edites, cambia en todas.
-Cada una decide qué manda con **SALIDA DE ESTA INSTANCIA** (arriba a la derecha).
-
-| Instancia | Salida | Output port | Instrumento | Input port |
+| Instancia | salida | Output port | Instrumento | Input port |
 |---|---|---|---|---|
-| SLOOP Studio #1 | Solo DRUMS | 1 | batería VST (o FPC vía Patcher) | 1 |
-| SLOOP Studio #2 | Solo SYNTH 1 | 2 | Serum | 2 |
-| SLOOP Studio #3 | Solo SYNTH 2 | 3 | Surge XT | 3 |
-| SLOOP Studio #4 | Solo SYNTH 3 | 4 | Vital | 4 |
+| #1 | solo synth 1 | 1 | Serum | 1 |
+| #2 | solo synth 2 | 2 | Surge XT | 2 |
+| #3 | solo synth 3 | 3 | Vital | 3 |
+| #4 | solo drums | 4 | batería VST | 4 |
 
-La pestaña de una pista que no sale de esa instancia dice *no sale aquí*.
+**El FM-1 como teclado:**
 
-### El FM-1 como controlador
+1. En **Options → MIDI Settings → Input**, activa el puerto *Felucca*.
+2. Selecciona en el Channel Rack la instancia de Floop Studio.
+3. Lo que tocas suena en la pista seleccionada. Con **rec** y Play en FL, se graba en el paso más cercano.
 
-1. Conecta el FM-1 por USB. En **Options → MIDI Settings → Input**, activa su puerto (se llama *SLOOP*, *Felucca* o *FM-1*), con *Controller type: generic*.
-2. FL manda el teclado al canal seleccionado del Channel Rack. Selecciona la instancia de SLOOP Studio que **sale** por la pista que quieres tocar.
-3. Lo que tocas suena en la **pista seleccionada** (la pestaña resaltada), en su canal:
-   - En DRUMS, cada tecla blanca es un sonido, desde F3 = KICK, como en SLOOP. Las negras tocan la blanca de su izquierda.
-   - Las perillas (CC), el pitch bend y la presión van al canal de la pista seleccionada.
-4. **REC** + Play en FL: lo que tocas se graba en el paso más cercano.
+## Grabar el audio del FM-1 en FL
 
-La luz **MIDI IN** parpadea cuando llegan notas y **PLAY FL** se enciende con el transporte de FL.
+Por USB, el FM-1 también es una entrada de audio (*Felucca*, estéreo, no necesita driver).
 
-## Qué está verificado
+1. En **Configuración de Audio MIDI** (Mac), crea un **dispositivo agregado** con *Felucca* como entrada y tu salida de audio.
+2. En **FL → Options → Audio Settings**, elige ese dispositivo.
+3. En el Mixer, en un insert libre, elige la entrada *Felucca*, arma la grabación y dale REC.
 
-- Pruebas del motor (`Tests/CoreTests.cpp`): pasos exactos en la rejilla con cualquier tamaño de buffer, gate, acordes, inicio a mitad de compás, loops, stop, mute, salida por pista, largo de patrón, cambio de tempo y guardado del estado.
-- `auval` de Apple: **AU VALIDATION SUCCEEDED**.
-- `sloop_host_check` carga el **VST3 compilado** como lo haría un host, toca un compás y comprueba el MIDI: 4 kicks, 4 hats y el acorde, con el kick en la muestra 0. Una instancia *Solo DRUMS* no deja salir el synth.
-- `sloop_ui_snapshot` dibuja la interfaz (las imágenes de `docs/`).
+Con **reloj: fl → fm-1**, lo que grabes cae a tiempo con FL.
 
-- **En FL Studio 2026:** el plugin carga como VST3, sigue el transporte de FL (luz PLAY FL y cursor de pasos) y su MIDI llega a Surge XT por el puerto 0.
+## Qué está probado
 
-**Aún no probado:** FPC o FLEX a través de Patcher, el modo de varias instancias con puertos distintos, y el FM-1 conectado.
+**Pruebas automáticas:**
 
-- **Con un FM-1 real (SLOOP 2.8.5, puerto Felucca), 16 nov 2026:**
-  - Lectura: el patrón completo en 0,6 s, igual al que muestra el SLOOP Editor.
-  - Modo vivo: 10 s conectado sin errores.
-  - Escritura: OPEN HAT HARD x3 escrito, verificado y restaurado (`sloop_fm1_probe escritura`).
+- `ctest`: motor (rejilla exacta con cualquier buffer, gate, acordes, loops, mute, 64 pasos, guardado) y formato de samples comparado con `sampleio.py` de SLOOP.
+- `auval`: AU VALIDATION SUCCEEDED.
+- `sloop_host_check`: carga el VST3 y comprueba su MIDI.
+- `sloop_ui_snapshot`: genera las capturas de `docs/`.
 
-- **Reloj con el FM-1 real** (`sloop_fm1_probe reloj`): FL parado = FM-1 en STOP a 120 BPM; PLAY = FM-1 en PLAY a 120 BPM; STOP = FM-1 en STOP; SYNC restaurado al final.
-- **▶ FM-1 con el FM-1 real** (`sloop_fm1_probe transporte`): PLAY → STOP → PLAY, y el FM-1 quedó como estaba.
-- **REC con el FM-1 real** (`sloop_fm1_probe transporte`): REC encendido y apagado, y el estado se refleja en el plugin.
-- **Samples con el FM-1 real:** el formato coincide byte por byte con `sampleio.py` de SLOOP. Se subió un tono de prueba a USR2 (`sloop_fm1_probe subir 2 PRUEBA …`) y el FM-1 lo aceptó (CRC correcto); USR1, USR3 y USR4 no se tocaron.
-- **Envío a la FM-1 por la API MIDI 1.0 de macOS:** JUCE 8 envía por la API MIDI 2.0 de CoreMIDI, y macOS la convierte para el puerto USB-MIDI 1.0 del FM-1. En ese camino, los SysEx largos de una subida llegaban dañados (el FM-1 los rechazaba por CRC). Por eso en Mac el plugin envía con `MIDISend`, como Chrome con el editor web (`Source/MacMidiOut.cpp`). Después del cambio se repitieron, con el FM-1, las pruebas de escritura de pasos, pista seleccionada y reloj, y todas pasaron.
-- **Puente PLAY con el FM-1 real** (`sloop_fm1_probe puente`, escuchando el puerto desde otro programa): FM-1 STOP → PLAY = CC 118; PLAY → STOP = CC 119; sin eco cuando "FL" ya estaba igual. El script de FL compila; **falta probarlo dentro de FL**.
-- **Pista seleccionada con el FM-1 real** (`sloop_fm1_probe pista`): pestaña SYNTH 1 → el FM-1 selecciona SYNTH 1; de vuelta a DRUMS → el FM-1 vuelve a DRUMS.
+**Probado en FL Studio 2026:** el plugin carga, sigue el transporte y su MIDI llega a Surge XT.
 
-**Aún no probado:** el botón FM-1 EN VIVO dentro de FL (el enlace es el mismo código que usa `sloop_fm1_probe vivo`), y una edición hecha en el FM-1 mientras el enlace está activo.
+**Probado con un FM-1 real (SLOOP 2.8.5), usando `sloop_fm1_probe`:**
 
-## Pendiente (siguientes prototipos)
+- leer y escribir el patrón;
+- el enlace en vivo y la pista seleccionada;
+- el reloj en los dos sentidos;
+- ▶ fm-1 y rec;
+- leer y escribir sonido;
+- subir samples;
+- REMOTE y las teclas;
+- el puente de play.
 
-- Mapear las perillas y botones del FM-1 a la interfaz: elegir pista, mute, REC, OCT, y modo REMOTE de SLOOP.
-- Notas por paso: velocidad o acento, ratchets, microtiming y parameter locks, como en SLOOP.
-- Secciones A–D, modo canción, módulo FX y nota editable por carril de batería (para kits de FPC que no usan GM).
-- Interfaz más cercana al hardware.
+**Aún no probado:**
+
+- el puente de play y External sync dentro de FL;
+- 64 pasos con el FM-1;
+- cargar y guardar presets de usuario con el equipo;
+- FPC o FLEX vía Patcher.
 
 ## Licencia
 
-El código de este proyecto se publica como GPL-3.0. Reutiliza ideas y la tabla de carriles de batería de [SLOOP](https://github.com/isod89/sloop-fm1) (GPL-3.0).
-JUCE 8 se distribuye bajo AGPLv3 o licencia comercial. Para uso personal no hay problema; para distribuir el plugin hay que cumplir una de las dos.
+El código de Floop Studio es **GPL-3.0**, como SLOOP. JUCE 8 se distribuye bajo AGPLv3 o licencia comercial. M-VAVE y FM-1 son marcas de sus dueños, y FL Studio es de Image-Line. Floop Studio no está afiliado con ellos.

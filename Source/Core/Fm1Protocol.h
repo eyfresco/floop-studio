@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The SLOOP editor protocol (SysEx over USB-MIDI), the part SLOOP Studio uses to read the FM-1's
+// The SLOOP editor protocol (SysEx over USB-MIDI), the part Floop Studio uses to read the FM-1's
 // pattern. Reference: sloop-fm1 web/EDITOR_PROTOCOL.md (firmware/src/editor.c).
 //
 // Frame: F0 7D 46 4C <cmd> <args...> F7. Every request gets one reply with the same <cmd>.
@@ -97,6 +97,7 @@ struct Info
 {
     std::string version;
     int nEngines = 0, pCount = 0, gCount = 0, nStep = 0, pE0 = 0, nTracks = 1, protocol = 1;
+    std::vector<std::string> engines;
 };
 
 inline std::optional<Info> parseInfo(const Bytes& a)
@@ -112,9 +113,12 @@ inline std::optional<Info> parseInfo(const Bytes& a)
     };
     if (!str(info.version) || p + 5 > a.size()) return std::nullopt;
     info.nEngines = a[p++]; info.pCount = a[p++]; info.gCount = a[p++]; info.nStep = a[p++]; info.pE0 = a[p++];
-    std::string skip;
+    std::string name;
     for (int e = 0; e < info.nEngines; ++e)
-        if (!str(skip)) return info;   // old firmware may end early
+    {
+        if (!str(name)) return info;   // old firmware may end early
+        info.engines.push_back(name);
+    }
     if (p < a.size()) info.nTracks = a[p++];
     if (p < a.size()) info.protocol = a[p++];
     return info;

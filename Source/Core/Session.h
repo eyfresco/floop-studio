@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// SLOOP Studio — the pattern shared by every plugin instance in the process.
+// Floop Studio — the pattern shared by every plugin instance in the process.
 //
 // FL Studio gives each plugin a single MIDI output port, and an instrument listening on a port
 // hears every MIDI channel on it. To send each track to a different instrument (DRUMS -> FPC,
@@ -17,7 +17,9 @@ namespace sloop {
 
 constexpr int kTracks = 4;     // 0 DRUMS, 1..3 SYNTH 1..3 (as on the FM-1, drums first in the UI)
 constexpr int kDrums = 0;
-constexpr int kSteps = 16;
+constexpr int kSteps = 64;          // as SLOOP (NSTEP): a pattern of up to 64 steps (4 bars of 16ths)
+constexpr int kDefaultLength = 16;
+constexpr int kPageSteps = 16;      // the grid shows 16 at a time (or all 64, zoomed out)
 constexpr int kLanes = 16;     // drum sounds, one per white key on SLOOP
 
 // SLOOP's drum lanes (firmware/src/drums.c LANE_NOTE): kick, kick 2, snare, clap, hat, open hat,
@@ -92,7 +94,7 @@ struct Session
         {
             channel[t] = (uint8_t) (t == kDrums ? 10 : t);
             muted[t] = 0;
-            length[t] = kSteps;
+            length[t] = kDefaultLength;
             gate[t] = t == kDrums ? 25 : 80;
             velocity[t] = 100;
         }
@@ -154,7 +156,7 @@ struct Session
     // --- persistence: a compact text form the plugin stores in the FL project ---
     std::string serialise() const
     {
-        std::string out = "SLOOP2";
+        std::string out = "SLOOP3";   // SLOOP3: 64 steps; SLOOP1 / SLOOP2: 16
         auto hex = [&out](uint64_t v, int digits) {
             static const char* d = "0123456789abcdef";
             for (int i = digits - 1; i >= 0; --i) out += d[(v >> (i * 4)) & 15u];
@@ -175,8 +177,10 @@ struct Session
 
     bool deserialise(const std::string& in)
     {
-        const bool v2 = in.rfind("SLOOP2", 0) == 0;   // SLOOP1 (prototype 1): no levels / rolls
+        // SLOOP1 (prototype 1): 16 steps, no levels / rolls; SLOOP2: 16 steps; SLOOP3: 64 steps
+        const bool v3 = in.rfind("SLOOP3", 0) == 0, v2 = v3 || in.rfind("SLOOP2", 0) == 0;
         if (!v2 && in.rfind("SLOOP1", 0) != 0) return false;
+        const int n = v3 ? kSteps : 16;
         size_t p = 6;
         bool ok = true;
         auto take = [&](int digits) -> uint64_t {
@@ -192,10 +196,10 @@ struct Session
             return v;
         };
         Session tmp;   // parse fully before touching the live pattern
-        for (int s = 0; s < kSteps; ++s) tmp.drum[s] = (uint16_t) take(4);
+        for (int s = 0; s < n; ++s) tmp.drum[s] = (uint16_t) take(4);
         for (int l = 0; l < kLanes; ++l) tmp.laneNote[l] = (uint8_t) (take(2) & 127u);
         for (int t = 1; t < kTracks; ++t)
-            for (int s = 0; s < kSteps; ++s) { tmp.notesLo[t][s] = take(16); tmp.notesHi[t][s] = take(16); }
+            for (int s = 0; s < n; ++s) { tmp.notesLo[t][s] = take(16); tmp.notesHi[t][s] = take(16); }
         for (int t = 0; t < kTracks; ++t)
         {
             tmp.channel[t] = clampU8(take(2), 1, 16);
@@ -206,7 +210,7 @@ struct Session
         }
         const int sel = (int) take(2);
         if (v2)
-            for (int st = 0; st < kSteps; ++st) { tmp.drumLevel[st] = (uint32_t) take(8); tmp.drumRoll[st] = (uint32_t) take(8); }
+            for (int st = 0; st < n; ++st) { tmp.drumLevel[st] = (uint32_t) take(8); tmp.drumRoll[st] = (uint32_t) take(8); }
         if (!ok) return false;
 
         for (int s = 0; s < kSteps; ++s)

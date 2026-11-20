@@ -4,8 +4,8 @@
 namespace sloop {
 
 namespace {
-const juce::Colour kBg { 0xff15171b }, kPanel { 0xff1f2228 }, kCell { 0xff2a2e36 }, kText { 0xffe9ebef },
-                   kDim { 0xff8a909c }, kAccent { 0xffff8a3d }, kInst { 0xff3dd6ff }, kGood { 0xff4ade80 }, kBad { 0xffe5383b };
+const juce::Colour kBg = ui::bg, kPanel = ui::s1, kCell = ui::s2, kText = ui::fg, kDim = ui::dim, kAccent = ui::orange,
+                   kInst = ui::blue, kGood = ui::green, kBad = ui::red;
 juce::String u8(const char* s) { return juce::String::fromUTF8(s); }
 const char* kNoteNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 juce::String noteName(int n) { return juce::String(kNoteNames[n % 12]) + juce::String(n / 12 - 1); }
@@ -55,8 +55,11 @@ void SampleJob::run()
 
 SamplesPanel::SamplesPanel(Fm1Live& l) : live(l)
 {
-    kitButton.setButtonText(u8("KIT DE BATERÍA"));
-    addButton.setButtonText(u8("AGREGAR ARCHIVOS…"));
+    instButton.setButtonText("instrumento");
+    readButton.setButtonText("leer fm-1");
+    clearButton.setButtonText("vaciar");
+    kitButton.setButtonText(u8("kit de batería"));
+    addButton.setButtonText(u8("agregar archivos…"));
     useKitToggle.setButtonText(u8("Usar en DRUMS al enviar"));
     useKitToggle.setToggleState(true, juce::dontSendNotification);
     useKitToggle.setColour(juce::ToggleButton::textColourId, kDim);
@@ -77,11 +80,12 @@ SamplesPanel::SamplesPanel(Fm1Live& l) : live(l)
         setStatus({}, true);
         refresh();
     };
-    sendButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffc2410c));
+    sendButton.setColour(juce::TextButton::buttonColourId, ui::orange.darker(0.35f));
+    sendButton.setColour(juce::TextButton::textColourOffId, ui::fg);
     sendButton.onClick = [this] { askToSend(); };
     nameEditor.setInputRestrictions(8, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -_.+#");
-    nameEditor.setTextToShowWhenEmpty(u8("NOMBRE"), kDim);
-    nameEditor.setFont(juce::FontOptions(14.0f));
+    nameEditor.setTextToShowWhenEmpty(u8("nombre"), kDim);
+    nameEditor.setFont(ui::mono(12.0f));
     for (juce::Component* c : { (juce::Component*) &readButton, (juce::Component*) &addButton, (juce::Component*) &clearButton,
                                 (juce::Component*) &sendButton, (juce::Component*) &nameEditor, (juce::Component*) &useKitToggle })
         addAndMakeVisible(c);
@@ -102,7 +106,7 @@ void SamplesPanel::visibilityChanged()
 
 juce::String SamplesPanel::slotLabel(int k) const
 {
-    juce::String s = "USR" + juce::String(k + 1);
+    juce::String s = "usr" + juce::String(k + 1);
     if (!slotsKnown) return s;
     if (k >= (int) slots.size()) return s + u8(" · —");
     return s + u8(" · ") + (slots[(size_t) k].zones ? slots[(size_t) k].name.trim() : u8("vacío"));
@@ -123,7 +127,7 @@ void SamplesPanel::refresh()
         b.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff3a4050));
         b.setEnabled(k < (slotsKnown && !slots.empty() ? (int) slots.size() : smp::kSlots));
     }
-    sendButton.setButtonText(u8("ENVIAR A USR") + juce::String(slot + 1));
+    sendButton.setButtonText(u8("enviar a usr") + juce::String(slot + 1));
     useKitToggle.setVisible(kit);
     const bool busy = job != nullptr;
     for (juce::Component* c : { (juce::Component*) &sendButton, (juce::Component*) &readButton, (juce::Component*) &addButton,
@@ -139,37 +143,37 @@ void SamplesPanel::refresh()
 void SamplesPanel::resized()
 {
     auto r = getLocalBounds();
-    topArea = r.removeFromTop(64);
-    bottomArea = r.removeFromBottom(46);
+    topArea = r.removeFromTop(50);
+    bottomArea = r.removeFromBottom(34);
     bodyArea = r.reduced(0, 6);
 
-    auto row1 = topArea.removeFromTop(30);
-    instButton.setBounds(row1.removeFromLeft(130));
-    row1.removeFromLeft(4);
-    kitButton.setBounds(row1.removeFromLeft(150));
-    row1.removeFromLeft(28);
-    readButton.setBounds(row1.removeFromRight(100));
-    row1.removeFromRight(8);
+    auto row1 = topArea.removeFromTop(22);
+    instButton.setBounds(row1.removeFromLeft(100));
+    row1.removeFromLeft(2);
+    kitButton.setBounds(row1.removeFromLeft(120));
+    row1.removeFromLeft(16);
+    readButton.setBounds(row1.removeFromRight(84));
+    row1.removeFromRight(6);
     for (int k = smp::kSlots - 1; k >= 0; --k)
     {
-        slotButtons[(size_t) k].setBounds(row1.removeFromRight(150));
-        row1.removeFromRight(4);
+        slotButtons[(size_t) k].setBounds(row1.removeFromRight(118));
+        row1.removeFromRight(2);
     }
     topArea.removeFromTop(6);
-    auto row2 = topArea.removeFromTop(28);
-    nameEditor.setBounds(row2.removeFromLeft(130));
-    row2.removeFromLeft(8);
-    addButton.setBounds(row2.removeFromLeft(170));
-    row2.removeFromLeft(8);
-    clearButton.setBounds(row2.removeFromLeft(80));
-    meterArea = row2.removeFromRight(330);
+    auto row2 = topArea.removeFromTop(22);
+    nameEditor.setBounds(row2.removeFromLeft(110));
+    row2.removeFromLeft(6);
+    addButton.setBounds(row2.removeFromLeft(150));
+    row2.removeFromLeft(6);
+    clearButton.setBounds(row2.removeFromLeft(64));
+    meterArea = row2.removeFromRight(300);
 
-    auto b = bottomArea.reduced(0, 8);
-    sendButton.setBounds(b.removeFromLeft(150));
+    auto b = bottomArea.reduced(0, 6);
+    sendButton.setBounds(b.removeFromLeft(120));
     b.removeFromLeft(12);
-    useKitToggle.setBounds(b.removeFromLeft(200));
+    useKitToggle.setBounds(b.removeFromLeft(190));
 
-    const int cols = 4, gap = 8;
+    const int cols = 4, gap = 6;
     const int pw = (bodyArea.getWidth() - gap * (cols - 1)) / cols, ph = (bodyArea.getHeight() - gap * 3) / 4;
     for (int i = 0; i < 16; ++i)
         padRects[(size_t) i] = { bodyArea.getX() + (i % cols) * (pw + gap), bodyArea.getY() + (i / cols) * (ph + gap), pw, ph };
@@ -223,7 +227,7 @@ void SamplesPanel::paint(juce::Graphics& g)
         g.setColour(over ? kBad : (mode == Mode::Kit ? kAccent : kInst));
         g.fillRoundedRectangle(bar.withWidth((int) (bar.getWidth() * juce::jmin(1.0, used / smp::kMaxSeconds))).toFloat(), 3.0f);
         g.setColour(over ? kBad : kDim);
-        g.setFont(juce::FontOptions(12.0f));
+        g.setFont(ui::mono(12.0f));
         g.drawText(juce::String(used, 1) + " s de " + juce::String(smp::kMaxSeconds, 1) + " s"
                        + (over && mode == Mode::Kit ? u8(" · se recortará") : juce::String()),
                    meterArea.withTrimmedLeft(180), juce::Justification::centredLeft);
@@ -232,20 +236,20 @@ void SamplesPanel::paint(juce::Graphics& g)
     if (mode == Mode::Instrument)
     {
         g.setColour(kPanel);
-        g.fillRoundedRectangle(bodyArea.toFloat(), 6.0f);
+        g.fillRoundedRectangle(bodyArea.toFloat(), 2.0f);
         auto head = bodyArea.withHeight(22).reduced(10, 0);
         g.setColour(kDim);
-        g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+        g.setFont(ui::mono(11.0f, true));
         const int w = bodyArea.getWidth();
-        g.drawText("ARCHIVO", head.withWidth(w * 40 / 100), juce::Justification::centredLeft);
-        g.drawText("NOTA", head.withX(bodyArea.getX() + w * 45 / 100).withWidth(110), juce::Justification::centredLeft);
-        g.drawText("TECLAS", head.withX(bodyArea.getX() + w * 62 / 100).withWidth(120), juce::Justification::centredLeft);
-        g.drawText("LARGO", head.withX(bodyArea.getX() + w * 78 / 100).withWidth(80), juce::Justification::centredLeft);
+        g.drawText("archivo", head.withWidth(w * 40 / 100), juce::Justification::centredLeft);
+        g.drawText("nota", head.withX(bodyArea.getX() + w * 45 / 100).withWidth(110), juce::Justification::centredLeft);
+        g.drawText("teclas", head.withX(bodyArea.getX() + w * 62 / 100).withWidth(120), juce::Justification::centredLeft);
+        g.drawText("largo", head.withX(bodyArea.getX() + w * 78 / 100).withWidth(80), juce::Justification::centredLeft);
         if (items.empty())
         {
             g.setColour(dragging ? kInst : kDim);
-            g.setFont(juce::FontOptions(14.0f));
-            g.drawFittedText(u8("Suelta aquí tus WAV / AIFF / MP3 (varios a la vez), o AGREGAR ARCHIVOS…\n"
+            g.setFont(ui::mono(14.0f));
+            g.drawFittedText(u8("Suelta aquí tus WAV / AIFF / MP3 (varios a la vez), o agregar archivos…\n"
                                 "Cada archivo suena en su nota (pon la nota en el nombre: PIANO_C4.wav, o ajústala aquí);\n"
                                 "las teclas de en medio tocan el más cercano. Hasta 16 archivos, unos 7 s en total.\n"
                                 "En el FM-1: una pista de synth con el motor SAMPLE y SET = USR1–USR4."),
@@ -287,14 +291,14 @@ void SamplesPanel::paint(juce::Graphics& g)
             const auto pr = padRects[(size_t) i];
             const auto& p = pads[(size_t) i];
             g.setColour(kPanel);
-            g.fillRoundedRectangle(pr.toFloat(), 6.0f);
+            g.fillRoundedRectangle(pr.toFloat(), 2.0f);
             g.setColour(i == dragPad ? kAccent : juce::Colour(0xff2f343d));
-            g.drawRoundedRectangle(pr.toFloat().reduced(0.5f), 6.0f, i == dragPad ? 2.0f : 1.0f);
+            g.drawRoundedRectangle(pr.toFloat().reduced(0.5f), 2.0f, i == dragPad ? 2.0f : 1.0f);
             auto t = pr.reduced(10, 6);
             auto head = t.removeFromTop(18);
-            g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+            g.setFont(ui::mono(12.0f, true));
             g.setColour(kAccent);
-            g.drawText(kLaneNames[(size_t) i], head, juce::Justification::centredLeft);
+            g.drawText(juce::String(kLaneNames[(size_t) i]).toLowerCase(), head, juce::Justification::centredLeft);
             g.setColour(kDim);
             g.drawText(kPadKeys[i], head.withTrimmedRight(p ? 22 : 0), juce::Justification::centredRight);
             if (p)
@@ -316,14 +320,14 @@ void SamplesPanel::paint(juce::Graphics& g)
                     g.drawVerticalLine(wave.getX() + x, wave.getCentreY() - h, wave.getCentreY() + h);
                 }
                 g.setColour(kText);
-                g.setFont(juce::FontOptions(11.0f));
+                g.setFont(ui::mono(11.0f));
                 g.drawText(juce::File(p->file).getFileName() + u8(" · ") + juce::String(n / (double) smp::kRate, 2) + " s", t,
                            juce::Justification::centredLeft, true);
             }
             else
             {
                 g.setColour(kDim.withAlpha(0.7f));
-                g.setFont(juce::FontOptions(11.0f));
+                g.setFont(ui::mono(11.0f));
                 g.drawFittedText(u8("Suelta un archivo\no haz clic"), t, juce::Justification::centred, 2);
             }
         }
@@ -339,13 +343,13 @@ void SamplesPanel::paint(juce::Graphics& g)
         g.setColour(kAccent);
         g.fillRoundedRectangle(bar.withWidth((int) (bar.getWidth() * job->progress.load())).toFloat(), 3.0f);
         g.setColour(kDim);
-        g.setFont(juce::FontOptions(12.0f));
+        g.setFont(ui::mono(12.0f));
         g.drawText(u8("  Enviando al FM-1…"), info, juce::Justification::centredLeft);
     }
     else if (status.isNotEmpty())
     {
         g.setColour(statusOk ? kGood : kBad);
-        g.setFont(juce::FontOptions(12.0f));
+        g.setFont(ui::mono(12.0f));
         g.drawFittedText(status, info, juce::Justification::centredLeft, 2);
     }
 }

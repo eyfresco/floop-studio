@@ -6,6 +6,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "SampleTools.h"
 #include "FM1Live.h"
+#include "SloopLook.h"
 
 namespace sloop {
 

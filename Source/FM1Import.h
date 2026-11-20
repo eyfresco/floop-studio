@@ -30,6 +30,9 @@ public:
     // The FM-1's ports are still there (unplugged: false).
     bool stillConnected() const;
 
+    // Everything that is not SysEx (the FM-1's keys as notes...), on the MIDI thread. Set before open().
+    std::function<void(const juce::MidiMessage&)> onMidi;
+
     using Push = std::pair<uint8_t, fm1::Bytes>;
     std::vector<Push> takePushes();
 
@@ -55,7 +58,7 @@ struct Fm1Pattern
     uint16_t drumOn[kSteps] {};
     uint32_t drumLevel[kSteps] {}, drumRoll[kSteps] {};
     uint64_t lo[kTracks][kSteps] {}, hi[kTracks][kSteps] {};
-    int length[kTracks] { kSteps, kSteps, kSteps, kSteps };
+    int length[kTracks] { kDefaultLength, kDefaultLength, kDefaultLength, kDefaultLength };
     int muted[kTracks] {};
     int ties = 0;   // TIE steps read (a tie holds the previous note: not shown in the plugin yet)
 

@@ -5,7 +5,7 @@
 #include "FM1Live.h"
 #include "FM1Clock.h"
 
-// SLOOP Studio: a 4-track step sequencer and MIDI controller for FL Studio. It makes no sound:
+// Floop Studio: a 4-track step sequencer and MIDI controller for FL Studio. It makes no sound:
 // its MIDI goes out through FL's routing to the instruments the user picks (FPC, FLEX, Serum...).
 class SloopProcessor : public juce::AudioProcessor
 {
@@ -24,7 +24,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "SLOOP Studio"; }
+    const juce::String getName() const override { return "Floop Studio"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return true; }
     bool isMidiEffect() const override { return false; }

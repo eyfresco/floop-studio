@@ -14,7 +14,7 @@ MIDIClientRef midiClient()
 {
     static std::once_flag once;
     static MIDIClientRef client = 0;
-    std::call_once(once, [] { MIDIClientCreate(CFSTR("SLOOP Studio"), nullptr, nullptr, &client); });
+    std::call_once(once, [] { MIDIClientCreate(CFSTR("Floop Studio"), nullptr, nullptr, &client); });
     return client;
 }
 
@@ -22,7 +22,7 @@ MIDIPortRef outputPort()
 {
     static std::once_flag once;
     static MIDIPortRef port = 0;
-    std::call_once(once, [] { if (midiClient()) MIDIOutputPortCreate(midiClient(), CFSTR("SLOOP Studio out"), &port); });
+    std::call_once(once, [] { if (midiClient()) MIDIOutputPortCreate(midiClient(), CFSTR("Floop Studio out"), &port); });
     return port;
 }
 
@@ -81,7 +81,7 @@ VirtualMidiSource& VirtualMidiSource::get()
 VirtualMidiSource::VirtualMidiSource()
 {
     MIDIEndpointRef e = 0;
-    if (midiClient() && MIDISourceCreate(midiClient(), CFSTR("SLOOP Studio"), &e) == noErr) source = e;
+    if (midiClient() && MIDISourceCreate(midiClient(), CFSTR("Floop Studio"), &e) == noErr) source = e;
 }
 
 bool VirtualMidiSource::send(const uint8_t* bytes, size_t n)

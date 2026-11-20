@@ -2,63 +2,76 @@
 #include "PluginEditor.h"
 
 using namespace sloop;
+namespace u = sloop::ui;
 
 namespace {
-const juce::Colour kBg { 0xff15171b }, kPanel { 0xff1f2228 }, kCellOff { 0xff2a2e36 },
-                   kCellBeat { 0xff333844 }, kText { 0xffe9ebef }, kDim { 0xff8a909c };
 const char* kNoteNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-
 juce::String noteName(int n) { return juce::String(kNoteNames[n % 12]) + juce::String(n / 12 - 1); }
+juce::String u8(const char* s) { return juce::String::fromUTF8(s); }
 
-void setupSlider(juce::Slider& s, juce::Label& l, const juce::String& name, int lo, int hi, juce::Component& parent)
+void setupSlider(juce::Slider& s, juce::Label& l, const char* name, int lo, int hi, juce::Component& parent)
 {
     s.setSliderStyle(juce::Slider::LinearBar);
     s.setRange(lo, hi, 1);
     s.setTextBoxIsEditable(false);
-    s.setColour(juce::Slider::trackColourId, juce::Colour(0xff3a4050));
-    s.setColour(juce::Slider::textBoxTextColourId, kText);
+    s.setColour(juce::Slider::backgroundColourId, u::s2);
+    s.setColour(juce::Slider::textBoxTextColourId, u::fg);
     s.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     l.setText(name, juce::dontSendNotification);
-    l.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-    l.setColour(juce::Label::textColourId, kDim);
+    l.setFont(u::mono(11.0f));
+    l.setJustificationType(juce::Justification::centredRight);
     parent.addAndMakeVisible(s);
     parent.addAndMakeVisible(l);
 }
-}
 
-juce::Colour SloopEditor::trackColour(int t)
+void setupLabel(juce::Label& l, const char* text, juce::Component& parent)
 {
-    static const juce::Colour c[kTracks] = { juce::Colour(0xffff8a3d), juce::Colour(0xff3dd6ff),
-                                             juce::Colour(0xffff4fa3), juce::Colour(0xffb6f24a) };
-    return c[juce::jlimit(0, kTracks - 1, t)];
+    l.setText(text, juce::dontSendNotification);
+    l.setFont(u::mono(11.0f));
+    l.setJustificationType(juce::Justification::centredRight);
+    parent.addAndMakeVisible(l);
+}
 }
 
 SloopEditor::SloopEditor(SloopProcessor& p)
     : AudioProcessorEditor(p), proc(p), session(p.session)
 {
-    outputLabel.setText("SALIDA DE ESTA INSTANCIA", juce::dontSendNotification);
-    outputLabel.setFont(juce::FontOptions(10.0f, juce::Font::bold));
-    outputLabel.setColour(juce::Label::textColourId, kDim);
-    addAndMakeVisible(outputLabel);
+    setLookAndFeel(&look);
 
-    outputBox.addItem("Todas las pistas", 1);
-    for (int t = 0; t < kTracks; ++t) outputBox.addItem(juce::String("Solo ") + kTrackNames[t], t + 2);
-    outputBox.setSelectedId(proc.outputTrack.load() + 2, juce::dontSendNotification);
-    outputBox.onChange = [this] { proc.outputTrack = outputBox.getSelectedId() - 2; repaint(); };
-    outputBox.setTooltip(juce::String(juce::CharPointer_UTF8(
-        "FL da un solo puerto MIDI por plugin. Para mandar cada pista a otro instrumento, "
-        "carga una instancia por pista y elige aqu\xc3\xad cu\xc3\xa1l env\xc3\xad" "a.")));
-    addAndMakeVisible(outputBox);
+    // --- header ---
+    clockBox.addItem("reloj: libre", 1);
+    clockBox.addItem(u8("reloj: fl → fm-1"), 2);
+    clockBox.addItem(u8("reloj: fm-1 → fl"), 3);
+    clockBox.setTooltip(u8("Quién manda el tempo y PLAY/STOP.\n"
+                           "fl → fm-1: FL manda su reloj al FM-1 (pone SYNC = USB en el FM-1; arranca en la barra de compás).\n"
+                           "fm-1 → fl: el FM-1 manda su reloj (SYNC = INT, CLOCK = ON). En FL: Options > MIDI Settings > "
+                           "External sync = MIDI clock, con el puerto Felucca. Necesita fm-1 vivo.\n"
+                           "Al cambiar, el FM-1 vuelve a sus ajustes de antes."));
+    clockBox.onChange = [this] { chooseClock(clockBox.getSelectedId()); };
 
-    // REC: with the FM-1 live, the FM-1's own REC; otherwise SLOOP Studio records the keys itself.
-    recButton.setClickingTogglesState(false);
-    recButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xffe5383b));
+    liveButton.setColour(juce::TextButton::buttonOnColourId, u::green);
+    liveButton.setTooltip(u8("Edita el FM-1 en vivo, como el SLOOP Editor: lo que cambies aquí se escribe en el FM-1 "
+                             "y lo que cambies en el FM-1 aparece aquí."));
+    liveButton.onClick = [this] {
+        if (proc.live->isEnabled()) proc.live->setEnabled(false);
+        else askToGoLive();
+        refreshControls();
+    };
+
+    // PLAY: the FM-1's PLAY (a plugin cannot start FL's transport; FL's own PLAY drives the clock).
+    playButton.setButtonText(u8("▶ fm-1"));
+    playButton.setColour(juce::TextButton::buttonOnColourId, u::green);
+    playButton.setTooltip(u8("PLAY / STOP del FM-1, como su botón PLAY (con fm-1 vivo)."));
+    playButton.onClick = [this] { proc.live->pressPlay(); };
+
+    // REC: with the FM-1 live, the FM-1's own REC; otherwise Floop Studio records the keys itself.
+    recButton.setColour(juce::TextButton::buttonOnColourId, u::red);
     recButton.onClick = [this] {
         if (proc.live->isLive() && proc.live->hasTransport())
         {
             if (proc.live->recBlockedBySong())
             {
-                notice = juce::String::fromUTF8("El FM-1 está tocando su canción: detenla para grabar");
+                notice = u8("el FM-1 está tocando su canción: detenla para grabar");
                 noticeUntil = juce::Time::getMillisecondCounter() + 3000;
                 repaint();
             }
@@ -66,78 +79,111 @@ SloopEditor::SloopEditor(SloopProcessor& p)
         }
         else { session.recording = !session.recording.load(); refreshControls(); }
     };
-    addAndMakeVisible(recButton);
 
-    // PLAY: the FM-1's PLAY (a plugin cannot start FL's transport; FL's own PLAY drives the clock).
-    playButton.setButtonText(juce::String::fromUTF8("▶ FM-1"));
-    playButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff16a34a));
-    playButton.setTooltip(juce::String::fromUTF8("PLAY / STOP del FM-1, como su botón PLAY (con FM-1 EN VIVO)."));
-    playButton.onClick = [this] { proc.live->pressPlay(); };
-    addAndMakeVisible(playButton);
+    outputBox.addItem("salida: todas", 1);
+    for (int t : { 1, 2, 3, kDrums })   // the FM-1's order: tracks 1..3 the synths, 4 the drums
+        outputBox.addItem("salida: " + juce::String(kTrackNames[t]).toLowerCase(), t + 2);
+    outputBox.onChange = [this] { proc.outputTrack = outputBox.getSelectedId() - 2; repaint(); };
+    outputBox.setTooltip(u8("FL da un solo puerto MIDI por plugin. Para mandar cada pista a otro instrumento, "
+                            "carga una instancia por pista y elige aquí cuál envía."));
+    for (juce::Component* c : { (juce::Component*) &clockBox, (juce::Component*) &liveButton, (juce::Component*) &playButton,
+                                (juce::Component*) &recButton, (juce::Component*) &outputBox })
+        addAndMakeVisible(c);
 
-    syncButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff2563eb));
-    syncButton.setTooltip(juce::String::fromUTF8(
-        "Manda el tempo y PLAY/STOP de FL al FM-1 (reloj MIDI) y pone SYNC = USB en el FM-1. "
-        "El FM-1 arranca en la primera barra de compás de FL."));
-    syncButton.onClick = [this] { proc.clock->setEnabled(!proc.clock->isEnabled()); refreshControls(); };
-    addAndMakeVisible(syncButton);
+    // --- tabs ---
+    patternTab.setButtonText(u8("patrón"));
+    soundTab.setButtonText(u8("sonido"));
+    soundTab.setTooltip(u8("El sonido de la pista seleccionada en el FM-1: motor, presets y perillas."));
+    soundsTab.setButtonText(u8("samples"));
+    soundsTab.setTooltip(u8("Tus samples e instrumentos y kits de batería para USR1–USR4 del FM-1."));
+    mapTab.setButtonText("mapa midi");
+    mapTab.setTooltip(u8("El FM-1 con el MIDI de cada tecla y botón; tócalo y púlsalo desde aquí."));
+    creditsTab.setButtonText(u8("créditos"));
+    for (auto* b : { &patternTab, &soundTab, &soundsTab, &mapTab, &creditsTab })
+    {
+        b->setColour(juce::TextButton::buttonOnColourId, u::s3);
+        b->setColour(juce::TextButton::textColourOnId, u::fg);
+        addAndMakeVisible(*b);
+    }
+    patternTab.onClick = [this] { setView(ViewPattern); };
+    soundTab.onClick = [this] { setView(ViewSound); };
+    soundsTab.onClick = [this] { setView(ViewSamples); };
+    mapTab.onClick = [this] { setView(ViewMap); };
+    creditsTab.onClick = [this] { setView(ViewCredits); };
 
-    clearButton.onClick = [this] { session.clearTrack(selected()); };
-
-    liveButton.setClickingTogglesState(false);
-    liveButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff16a34a));
-    liveButton.setTooltip(juce::String::fromUTF8(
-        "Edita el FM-1 en vivo, como el SLOOP Editor: lo que cambies aquí se escribe en el FM-1 "
-        "y lo que cambies en el FM-1 aparece aquí."));
-    liveButton.onClick = [this] {
-        if (proc.live->isEnabled()) proc.live->setEnabled(false);
-        else askToGoLive();
-        refreshControls();
-    };
-    addAndMakeVisible(liveButton);
-    addAndMakeVisible(clearButton);
-
-    octDown.onClick = [this] { auto& b = baseNote[selected()]; b = juce::jmax(0, b - 12); repaint(); };
-    octUp.onClick = [this] { auto& b = baseNote[selected()]; b = juce::jmin(127 - kSynthRows + 1, b + 12); repaint(); };
-    addAndMakeVisible(octDown);
-    addAndMakeVisible(octUp);
-
-    setupSlider(lenSlider, lenLabel, "PASOS", 1, kSteps, *this);
-    setupSlider(gateSlider, gateLabel, "GATE %", 5, 100, *this);
-    setupSlider(velSlider, velLabel, "VELOCIDAD", 1, 127, *this);
-    setupSlider(chSlider, chLabel, "CANAL MIDI", 1, 16, *this);
+    // --- patrón ---
+    setupSlider(lenSlider, lenLabel, "pasos", 1, kSteps, *this);
+    setupSlider(gateSlider, gateLabel, "gate", 5, 100, *this);
+    setupSlider(velSlider, velLabel, "vel", 1, 127, *this);
+    setupSlider(chSlider, chLabel, "ch", 1, 16, *this);
     lenSlider.onValueChange = [this] { session.length[selected()] = (uint8_t) lenSlider.getValue(); session.touch(); };
+    lenSlider.setTooltip(u8("Largo del patrón de la pista: 1 a 64 pasos (4 compases)."));
     gateSlider.onValueChange = [this] { session.gate[selected()] = (uint8_t) gateSlider.getValue(); session.touch(); };
     velSlider.onValueChange = [this] { session.velocity[selected()] = (uint8_t) velSlider.getValue(); session.touch(); };
     chSlider.onValueChange = [this] { session.channel[selected()] = (uint8_t) chSlider.getValue(); session.touch(); };
 
-    patternTab.setButtonText(juce::String::fromUTF8("PATRÓN"));
-    soundsTab.setButtonText(juce::String::fromUTF8("SONIDOS"));
-    soundsTab.setTooltip(juce::String::fromUTF8("Tus samples e instrumentos y kits de batería para USR1–USR4 del FM-1."));
-    for (auto* b : { &patternTab, &soundsTab })
+    setupLabel(levelLabel, "nivel", *this);
+    setupLabel(rollLabel, "roll", *this);
+    setupLabel(octLabel, "octava", *this);
+    static const int levelOrder[4] = { LvGhost, LvSoft, LvNorm, LvHard };   // quiet to loud, as the editor
+    for (int i = 0; i < 4; ++i)
     {
-        b->setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff3a4050));
-        addAndMakeVisible(*b);
+        auto& lb = levelButtons[(size_t) i];
+        lb.setButtonText(juce::String(kLevelNames[(size_t) levelOrder[i]]).toLowerCase());
+        lb.onClick = [this, i] { brushLevel = levelOrder[i]; refreshControls(); };
+        auto& rb = rollButtons[(size_t) i];
+        rb.setButtonText("x" + juce::String(i + 1));
+        rb.onClick = [this, i] { brushRoll = i; refreshControls(); };
+        addAndMakeVisible(lb);
+        addAndMakeVisible(rb);
     }
-    patternTab.onClick = [this] { setView(false); };
-    soundsTab.onClick = [this] { setView(true); };
-    flPlayToggle.setButtonText(juce::String::fromUTF8("PLAY del FM-1 → FL"));
-    flPlayToggle.setColour(juce::ToggleButton::textColourId, juce::Colour(0xff8a909c));
-    flPlayToggle.setTooltip(juce::String::fromUTF8(
-        "Con FM-1 EN VIVO: el PLAY / STOP del FM-1 arranca y detiene FL. Necesita el script "
-        "\"SLOOP Studio\" en FL (MIDI Settings: entrada \"SLOOP Studio\", Controller type \"SLOOP Studio\")."));
+    clearButton.setButtonText("limpiar");
+    clearButton.onClick = [this] { session.clearTrack(selected()); };
+    octDown.onClick = [this] { auto& b = baseNote[selected()]; b = juce::jmax(0, b - 12); repaint(); };
+    octUp.onClick = [this] { auto& b = baseNote[selected()]; b = juce::jmin(127 - kSynthRows + 1, b + 12); repaint(); };
+    flPlayToggle.setButtonText(u8("play fm-1 → fl"));
+    flPlayToggle.setTooltip(u8("Con fm-1 vivo: el PLAY / STOP del FM-1 arranca y detiene FL. Necesita el script "
+                               "\"Floop Studio\" en FL (MIDI Settings: entrada \"Floop Studio\", Controller type \"Floop Studio\")."));
     flPlayToggle.onClick = [this] { session.fm1DrivesFl = flPlayToggle.getToggleState(); };
-    addAndMakeVisible(flPlayToggle);
+    for (int pg = 0; pg < 4; ++pg)
+    {
+        auto& b = pageButtons[(size_t) pg];
+        b.setButtonText(juce::String(pg * kPageSteps + 1) + u8("–") + juce::String((pg + 1) * kPageSteps));
+        b.setColour(juce::TextButton::buttonOnColourId, u::s3);
+        b.setColour(juce::TextButton::textColourOnId, u::fg);
+        b.onClick = [this, pg] { page = pg; zoomAll = false; refreshControls(); };
+        addAndMakeVisible(b);
+    }
+    zoomButton.setButtonText("todo");
+    zoomButton.setTooltip(u8("Ver los 64 pasos a la vez (y volver a una página)."));
+    zoomButton.setColour(juce::TextButton::buttonOnColourId, u::s3);
+    zoomButton.setColour(juce::TextButton::textColourOnId, u::fg);
+    zoomButton.onClick = [this] { zoomAll = !zoomAll; refreshControls(); };
+    addAndMakeVisible(zoomButton);
+    for (juce::Component* c : { (juce::Component*) &clearButton, (juce::Component*) &octDown, (juce::Component*) &octUp,
+                                (juce::Component*) &flPlayToggle })
+        addAndMakeVisible(c);
+
     samples = std::make_unique<sloop::SamplesPanel>(*proc.live);
     addChildComponent(*samples);
+    soundPanel = std::make_unique<sloop::SoundPanel>(*proc.live);
+    addChildComponent(*soundPanel);
+    mapPanel = std::make_unique<sloop::MidiMapPanel>(*proc.live, session);
+    addChildComponent(*mapPanel);
+    creditsPanel = std::make_unique<sloop::CreditsPanel>();
+    addChildComponent(*creditsPanel);
 
-    setSize(1100, 640);
-    setView(false);
+    setSize(860, 520);
+    setView(ViewPattern);
     refreshControls();
     startTimerHz(30);
 }
 
-SloopEditor::~SloopEditor() { stopTimer(); }   // the live link keeps running with the editor closed
+SloopEditor::~SloopEditor()   // the live link keeps running with the editor closed
+{
+    stopTimer();
+    setLookAndFeel(nullptr);
+}
 
 void SloopEditor::askToGoLive()
 {
@@ -148,31 +194,55 @@ void SloopEditor::askToGoLive()
         for (int t = 1; t < kTracks && empty; ++t)
             empty = session.notesLo[t][st].load() == 0 && session.notesHi[t][st].load() == 0;
     }
-    auto& live = *proc.live;
-    if (empty) { live.setEnabled(true); refreshControls(); return; }
+    if (empty) { proc.live->setEnabled(true); refreshControls(); return; }
 
     juce::Component::SafePointer<SloopEditor> safe(this);
     juce::AlertWindow::showOkCancelBox(
-        juce::MessageBoxIconType::QuestionIcon, "FM-1 en vivo",
-        juce::String::fromUTF8("Al conectar, SLOOP Studio toma el patrón que tiene el FM-1 y reemplaza el actual "
-                               "(las 4 pistas). Desde ahí, lo que edites aquí se escribe en el FM-1."),
+        juce::MessageBoxIconType::QuestionIcon, "fm-1 vivo",
+        u8("Al conectar, Floop Studio toma el patrón que tiene el FM-1 y reemplaza el actual "
+           "(las 4 pistas). Desde ahí, lo que edites aquí se escribe en el FM-1."),
         "Conectar", "Cancelar", this,
         juce::ModalCallbackFunction::create([safe](int ok) {
             if (ok && safe) { safe->proc.live->setEnabled(true); safe->refreshControls(); }
         }));
 }
 
-void SloopEditor::setView(bool sounds)
+void SloopEditor::chooseClock(int mode)
 {
-    soundsView = sounds;
-    patternTab.setToggleState(!sounds, juce::dontSendNotification);
-    soundsTab.setToggleState(sounds, juce::dontSendNotification);
-    for (juce::Component* c : { (juce::Component*) &lenSlider, (juce::Component*) &gateSlider, (juce::Component*) &velSlider,
-                                (juce::Component*) &chSlider, (juce::Component*) &lenLabel, (juce::Component*) &gateLabel,
-                                (juce::Component*) &velLabel, (juce::Component*) &chLabel, (juce::Component*) &clearButton,
-                                (juce::Component*) &flPlayToggle })
-        c->setVisible(!sounds);
-    samples->setVisible(sounds);
+    // one master at a time: switching one way off before the other on (each puts its FM-1 settings back)
+    if (mode != 2) proc.clock->setEnabled(false);
+    if (mode != 3) proc.live->setClockOut(false);
+    if (mode == 2) proc.clock->setEnabled(true);
+    if (mode == 3)
+    {
+        if (!proc.live->isEnabled())
+        {
+            notice = u8("activa fm-1 vivo para que el FM-1 mande su reloj");
+            noticeUntil = juce::Time::getMillisecondCounter() + 3000;
+        }
+        else
+        {
+            proc.live->setClockOut(true);
+            session.fm1DrivesFl = false;   // FL follows the FM-1's START / STOP itself: no script needed
+            notice = u8("en FL: options > midi settings > external sync = midi clock (puerto felucca)");
+            noticeUntil = juce::Time::getMillisecondCounter() + 6000;
+        }
+    }
+    refreshControls();
+}
+
+void SloopEditor::setView(int v)
+{
+    view = v;
+    patternTab.setToggleState(v == ViewPattern, juce::dontSendNotification);
+    soundTab.setToggleState(v == ViewSound, juce::dontSendNotification);
+    soundsTab.setToggleState(v == ViewSamples, juce::dontSendNotification);
+    mapTab.setToggleState(v == ViewMap, juce::dontSendNotification);
+    mapPanel->setVisible(v == ViewMap);
+    creditsTab.setToggleState(v == ViewCredits, juce::dontSendNotification);
+    creditsPanel->setVisible(v == ViewCredits);
+    samples->setVisible(v == ViewSamples);
+    soundPanel->setVisible(v == ViewSound);
     refreshControls();
     repaint();
 }
@@ -180,45 +250,79 @@ void SloopEditor::setView(bool sounds)
 void SloopEditor::refreshControls()
 {
     const int t = selected();
+    const bool pattern = view == ViewPattern, drums = t == kDrums;
     lenSlider.setValue(session.length[t].load(), juce::dontSendNotification);
     gateSlider.setValue(session.gate[t].load(), juce::dontSendNotification);
     velSlider.setValue(session.velocity[t].load(), juce::dontSendNotification);
     chSlider.setValue(session.channel[t].load(), juce::dontSendNotification);
+    for (auto* s : { &lenSlider, &gateSlider, &velSlider, &chSlider })
+        s->setColour(juce::Slider::trackColourId, u::track(t).withAlpha(0.55f));
+
+    for (juce::Component* c : { (juce::Component*) &lenSlider, (juce::Component*) &gateSlider, (juce::Component*) &velSlider,
+                                (juce::Component*) &chSlider, (juce::Component*) &lenLabel, (juce::Component*) &gateLabel,
+                                (juce::Component*) &velLabel, (juce::Component*) &chLabel, (juce::Component*) &clearButton,
+                                (juce::Component*) &flPlayToggle })
+        c->setVisible(pattern);
+    static const int levelOrder[4] = { LvGhost, LvSoft, LvNorm, LvHard };
+    for (int i = 0; i < 4; ++i)
+    {
+        levelButtons[(size_t) i].setVisible(pattern && drums);
+        levelButtons[(size_t) i].setToggleState(levelOrder[i] == brushLevel, juce::dontSendNotification);
+        rollButtons[(size_t) i].setVisible(pattern && drums);
+        rollButtons[(size_t) i].setToggleState(i == brushRoll, juce::dontSendNotification);
+    }
+    levelLabel.setVisible(pattern && drums);
+    rollLabel.setVisible(pattern && drums);
+    for (juce::Component* c : { (juce::Component*) &octLabel, (juce::Component*) &octDown, (juce::Component*) &octUp })
+        c->setVisible(pattern && !drums);
+    {   // pages: the shown one lit; past the track's length dimmed; the playhead's page outlined
+        const int len = session.length[t].load(), play = proc.playStep[t].load();
+        for (int pg = 0; pg < 4; ++pg)
+        {
+            auto& b = pageButtons[(size_t) pg];
+            b.setVisible(pattern);
+            b.setToggleState(!zoomAll && pg == page, juce::dontSendNotification);
+            const bool used = pg * kPageSteps < len, playing = play >= 0 && play / kPageSteps == pg;
+            b.setColour(juce::TextButton::textColourOffId, used ? u::fg2 : u::dim.withAlpha(0.6f));
+            b.setColour(juce::TextButton::buttonColourId, playing ? u::track(t).withAlpha(0.35f) : u::s2);
+        }
+        zoomButton.setVisible(pattern);
+        zoomButton.setToggleState(zoomAll, juce::dontSendNotification);
+    }
+
     const bool fmLive = proc.live->isLive() && proc.live->hasTransport();
     recButton.setToggleState(fmLive ? proc.live->fm1Recording() : session.recording.load(), juce::dontSendNotification);
-    recButton.setTooltip(fmLive ? juce::String::fromUTF8("REC del FM-1, como su botón REC.")
-                                : juce::String::fromUTF8("Graba en SLOOP Studio lo que tocas en el FM-1 (con FL en PLAY)."));
+    recButton.setTooltip(fmLive ? u8("REC del FM-1, como su botón REC.")
+                                : u8("Graba en Floop Studio lo que tocas en el FM-1 (con FL en PLAY)."));
     playButton.setEnabled(fmLive);
     playButton.setToggleState(fmLive && proc.live->fm1Playing(), juce::dontSendNotification);
-    syncButton.setToggleState(proc.clock->isEnabled(), juce::dontSendNotification);
+    clockBox.setSelectedId(proc.clock->isEnabled() ? 2 : proc.live->clockOut() ? 3 : 1, juce::dontSendNotification);
+    liveButton.setToggleState(proc.live->isEnabled(), juce::dontSendNotification);
     flPlayToggle.setToggleState(session.fm1DrivesFl.load(), juce::dontSendNotification);
     outputBox.setSelectedId(proc.outputTrack.load() + 2, juce::dontSendNotification);
-    octDown.setVisible(t != kDrums && !soundsView);
-    octUp.setVisible(t != kDrums && !soundsView);
-    for (auto* s : { &lenSlider, &gateSlider, &velSlider, &chSlider })
-        s->setColour(juce::Slider::trackColourId, trackColour(t).withAlpha(0.45f));
+    repaint();
 }
 
 void SloopEditor::timerCallback()
 {
     bool dirty = false;
     {   // the live link's state and message (another instance may have switched it)
-        const bool on = proc.live->isEnabled();
-        if (liveButton.getToggleState() != on) liveButton.setToggleState(on, juce::dontSendNotification);
         const auto st = (int) proc.live->state();
         const auto m = proc.live->message();
-        if (st != seenLiveState || m != seenLiveMessage) { seenLiveState = st; seenLiveMessage = m; dirty = true; }
+        if (st != seenLiveState || m != seenLiveMessage) { seenLiveState = st; seenLiveMessage = m; refreshControls(); }
         if (noticeUntil && juce::Time::getMillisecondCounter() > noticeUntil) { noticeUntil = 0; notice.clear(); dirty = true; }
         // PLAY / REC / SYNC lights follow the FM-1 and the clock, whoever switched them
         const int transportBits = (proc.live->fm1Playing() ? 1 : 0) | (proc.live->fm1Recording() ? 2 : 0)
                                 | (proc.live->isLive() && proc.live->hasTransport() ? 4 : 0) | (proc.clock->isEnabled() ? 8 : 0)
+                                | (proc.live->clockOut() ? 1 << 10 : 0)
                                 | (session.recording.load() ? 16 : 0) | (proc.clock->waitingForBar() ? 32 : 0)
-                                | ((int) proc.clock->state() << 6);
-        if (transportBits != seenTransport) { seenTransport = transportBits; refreshControls(); dirty = true; }
+                                | ((int) proc.clock->state() << 6) | (proc.live->isEnabled() ? 1 << 9 : 0);
+        if (transportBits != seenTransport) { seenTransport = transportBits; refreshControls(); }
     }
-    if (const auto r = session.revision.load(); r != seenRevision) { seenRevision = r; refreshControls(); dirty = true; }
+    if (const auto r = session.revision.load(); r != seenRevision) { seenRevision = r; refreshControls(); }
     for (int t = 0; t < kTracks; ++t)
         if (const int s = proc.playStep[t].load(); s != seenSteps[t]) { seenSteps[t] = s; dirty = true; }
+    if (const int pp = proc.playStep[selected()].load() / kPageSteps; pp != seenPlayPage) { seenPlayPage = pp; refreshControls(); }
     if (const auto m = proc.midiInCount.load(); m != seenMidiIn) { seenMidiIn = m; midiLight = 6; dirty = true; }
     else if (midiLight > 0) { --midiLight; dirty = true; }
     if (dirty) repaint();
@@ -226,74 +330,112 @@ void SloopEditor::timerCallback()
 
 void SloopEditor::resized()
 {
-    auto r = getLocalBounds().reduced(16, 0);
-    headerArea = r.removeFromTop(64);
-    tabsArea = r.removeFromTop(66);
-    hintArea = r.removeFromTop(30);
-    {
-        auto tabs = hintArea.withSizeKeepingCentre(hintArea.getWidth(), 24);
-        patternTab.setBounds(tabs.removeFromLeft(96));
-        tabs.removeFromLeft(4);
-        soundsTab.setBounds(tabs.removeFromLeft(96));
-    }
-    footerArea = r.removeFromBottom(70);
-    gridArea = r.reduced(0, 4).withTrimmedBottom(16);   // room for the step numbers
-    if (samples) samples->setBounds(r.getUnion(footerArea).withTrimmedTop(4));
+    auto r = getLocalBounds().reduced(12, 8);
+    headerArea = r.removeFromTop(28);
+    r.removeFromTop(8);
+    tracksArea = r.removeFromTop(32);
+    r.removeFromTop(8);
+    tabsArea = r.removeFromTop(24);
+    r.removeFromTop(8);
+    contentArea = r;
 
-    auto h = headerArea.reduced(0, 14);
-    auto box = h.removeFromRight(210);
-    outputLabel.setBounds(box.removeFromTop(14));
-    outputBox.setBounds(box);
-    h.removeFromRight(12);
-    recButton.setBounds(h.removeFromRight(64));
+    // header, right to left: salida · rec · ▶ fm-1 · fm-1 vivo · sync fl
+    auto h = headerArea;
+    outputBox.setBounds(h.removeFromRight(120));
     h.removeFromRight(8);
-    playButton.setBounds(h.removeFromRight(70));
-    h.removeFromRight(8);
-    liveButton.setBounds(h.removeFromRight(124));
-    h.removeFromRight(8);
-    syncButton.setBounds(h.removeFromRight(84));
+    recButton.setBounds(h.removeFromRight(42));
+    h.removeFromRight(4);
+    playButton.setBounds(h.removeFromRight(60));
+    h.removeFromRight(4);
+    liveButton.setBounds(h.removeFromRight(78));
+    h.removeFromRight(4);
+    clockBox.setBounds(h.removeFromRight(124));
 
-    const int tabW = tabsArea.getWidth() / kTracks;
+    const int gap = 6, tw = (tracksArea.getWidth() - gap * (kTracks - 1)) / kTracks;
     for (int t = 0; t < kTracks; ++t)
     {
-        tabRects[t] = juce::Rectangle<int>(tabsArea.getX() + t * tabW, tabsArea.getY(), tabW, tabsArea.getHeight()).reduced(4, 6);
-        muteRects[t] = tabRects[t].withTrimmedLeft(tabRects[t].getWidth() - 34).withSizeKeepingCentre(24, 22).translated(-6, 0);
+        const int slot = (t + kTracks - 1) % kTracks;   // the FM-1's order: synth 1, 2, 3, then drums (track 4)
+        tabRects[(size_t) t] = { tracksArea.getX() + slot * (tw + gap), tracksArea.getY(), tw, tracksArea.getHeight() };
+        muteRects[(size_t) t] = tabRects[(size_t) t].withTrimmedLeft(tw - 28).reduced(4, 6);
     }
 
-    auto f = footerArea.reduced(0, 12);
-    auto place = [&f](juce::Slider& s, juce::Label& l, int w) {
-        auto c = f.removeFromLeft(w);
-        l.setBounds(c.removeFromTop(16));
-        s.setBounds(c.removeFromTop(26));
-        f.removeFromLeft(14);
+    auto tb = tabsArea;
+    patternTab.setBounds(tb.removeFromLeft(76));
+    tb.removeFromLeft(4);
+    soundTab.setBounds(tb.removeFromLeft(76));
+    tb.removeFromLeft(4);
+    soundsTab.setBounds(tb.removeFromLeft(76));
+    tb.removeFromLeft(4);
+    mapTab.setBounds(tb.removeFromLeft(86));
+    tb.removeFromLeft(4);
+    creditsTab.setBounds(tb.removeFromLeft(80));
+
+    samples->setBounds(contentArea);
+    soundPanel->setBounds(contentArea);
+    mapPanel->setBounds(contentArea);
+    creditsPanel->setBounds(contentArea);
+
+    // patrón: two tool rows, the step numbers, the grid, a hint line
+    auto c = contentArea;
+    toolA = c.removeFromTop(22);
+    c.removeFromTop(6);
+    toolB = c.removeFromTop(22);
+    c.removeFromTop(8);
+    hintArea = c.removeFromBottom(14);
+    c.removeFromBottom(4);
+    numbersArea = c.removeFromTop(14);
+    gridArea = c;
+
+    auto a = toolA;
+    auto place = [&a](juce::Label& l, juce::Slider& s, int lw) {
+        l.setBounds(a.removeFromLeft(lw));
+        a.removeFromLeft(4);
+        s.setBounds(a.removeFromLeft(70));
+        a.removeFromLeft(12);
     };
-    place(lenSlider, lenLabel, 150);
-    place(gateSlider, gateLabel, 150);
-    place(velSlider, velLabel, 150);
-    place(chSlider, chLabel, 150);
-    flPlayToggle.setBounds(f.removeFromLeft(190).withTrimmedTop(16).withHeight(26));
-    auto right = f.withTrimmedTop(16);
-    clearButton.setBounds(right.removeFromRight(90).withHeight(26));
-    right.removeFromRight(10);
-    octUp.setBounds(right.removeFromRight(70).withHeight(26));
-    right.removeFromRight(6);
-    octDown.setBounds(right.removeFromRight(70).withHeight(26));
+    place(lenLabel, lenSlider, 40);
+    place(gateLabel, gateSlider, 34);
+    place(velLabel, velSlider, 28);
+    place(chLabel, chSlider, 20);
+    clearButton.setBounds(a.removeFromRight(70));
+
+    auto b = toolB;
+    levelLabel.setBounds(b.removeFromLeft(40));
+    b.removeFromLeft(4);
+    for (auto& lb : levelButtons) { lb.setBounds(b.removeFromLeft(50)); b.removeFromLeft(2); }
+    b.removeFromLeft(14);
+    rollLabel.setBounds(b.removeFromLeft(34));
+    b.removeFromLeft(4);
+    for (auto& rb : rollButtons) { rb.setBounds(b.removeFromLeft(32)); b.removeFromLeft(2); }
+    auto o = toolB;
+    octLabel.setBounds(o.removeFromLeft(48));
+    o.removeFromLeft(4);
+    octDown.setBounds(o.removeFromLeft(26));
+    o.removeFromLeft(2);
+    octUp.setBounds(o.removeFromLeft(26));
+    flPlayToggle.setBounds(toolB.withTrimmedLeft(toolB.getWidth() - 128));
+    {   // pages + todo, left of the FL toggle
+        auto pgs = toolB.withTrimmedRight(134);
+        zoomButton.setBounds(pgs.removeFromRight(40));
+        pgs.removeFromRight(4);
+        for (int pg = 3; pg >= 0; --pg) { pageButtons[(size_t) pg].setBounds(pgs.removeFromRight(44)); pgs.removeFromRight(2); }
+    }
 }
 
 juce::Rectangle<int> SloopEditor::cellBounds(int row, int step) const
 {
     const auto area = gridArea.withTrimmedLeft(kLabelWidth);
-    const float w = area.getWidth() / (float) kSteps, h = area.getHeight() / (float) rowCount();
-    return juce::Rectangle<float>(area.getX() + step * w, area.getY() + row * h, w, h).toNearestInt();
+    const float w = area.getWidth() / (float) visibleSteps(), h = area.getHeight() / (float) rowCount();
+    return juce::Rectangle<float>(area.getX() + (step - firstStep()) * w, area.getY() + row * h, w, h).toNearestInt();
 }
 
 juce::Point<int> SloopEditor::cellAt(juce::Point<int> p) const
 {
     const auto area = gridArea.withTrimmedLeft(kLabelWidth);
     if (!area.contains(p)) return { -1, -1 };
-    const int step = (int) ((p.x - area.getX()) * kSteps / (float) area.getWidth());
+    const int step = firstStep() + (int) ((p.x - area.getX()) * visibleSteps() / (float) area.getWidth());
     const int row = (int) ((p.y - area.getY()) * rowCount() / (float) area.getHeight());
-    return { juce::jlimit(0, kSteps - 1, step), juce::jlimit(0, rowCount() - 1, row) };
+    return { juce::jlimit(firstStep(), firstStep() + visibleSteps() - 1, step), juce::jlimit(0, rowCount() - 1, row) };
 }
 
 bool SloopEditor::cellOn(int row, int step) const
@@ -305,7 +447,13 @@ bool SloopEditor::cellOn(int row, int step) const
 void SloopEditor::setCell(int row, int step, bool on)
 {
     const int t = selected();
-    if (t == kDrums) { session.setDrum(step, row, on); return; }
+    if (t == kDrums)
+    {
+        session.setDrum(step, row, on);   // (a new hit starts at NORM x1)
+        if (on && brushLevel != LvNorm) session.setLaneLevel(step, row, brushLevel);
+        if (on && brushRoll) session.setLaneRoll(step, row, brushRoll);
+        return;
+    }
 
     // Live with the FM-1: a step holds 4 notes at most there, so the 5th is refused here.
     if (on && proc.live->isEnabled() && !session.noteOn(t, step, noteForRow(row)))
@@ -314,7 +462,7 @@ void SloopEditor::setCell(int row, int step, bool on)
         for (int n = 0; n < 128; ++n) count += session.noteOn(t, step, n) ? 1 : 0;
         if (count >= 4)
         {
-            notice = juce::String::fromUTF8("El FM-1 guarda hasta 4 notas por paso");
+            notice = u8("el FM-1 guarda hasta 4 notas por paso");
             noticeUntil = juce::Time::getMillisecondCounter() + 2500;
             repaint();
             return;
@@ -328,213 +476,223 @@ void SloopEditor::mouseDown(const juce::MouseEvent& e)
     const auto p = e.getPosition();
     for (int t = 0; t < kTracks; ++t)
     {
-        if (muteRects[t].contains(p)) { session.muted[t] = session.muted[t].load() ? 0 : 1; session.touch(); return; }
-        if (tabRects[t].contains(p)) { session.selected = t; session.touch(); return; }
+        if (muteRects[(size_t) t].contains(p)) { session.muted[t] = session.muted[t].load() ? 0 : 1; session.touch(); return; }
+        if (tabRects[(size_t) t].contains(p)) { session.selected = t; session.touch(); return; }
     }
+    if (view != ViewPattern) return;
     const auto c = cellAt(p);
     if (c.x < 0) return;
 
-    // DRUMS, on a hit: Shift+click = one level louder (GHOST, SOFT, NORM, HARD), as in the SLOOP
-    // editor; Alt+click = one more roll (x1..x4).
-    if (selected() == kDrums && cellOn(c.y, c.x) && (e.mods.isShiftDown() || e.mods.isAltDown()))
+    if (selected() == kDrums)
     {
-        if (e.mods.isShiftDown())
+        const bool on = cellOn(c.y, c.x);
+        // Shift+click on a hit: one level louder (GHOST, SOFT, NORM, HARD), as in the SLOOP editor.
+        if (on && e.mods.isShiftDown())
         {
             static const int louder[4] = { LvHard, LvSoft, LvNorm, LvGhost };   // index: level -> next
             session.setLaneLevel(c.x, c.y, louder[session.laneLevel(c.x, c.y)]);
+            lastCell = { -1, -1 };
+            return;
         }
-        else session.setLaneRoll(c.x, c.y, (session.laneRoll(c.x, c.y) + 1) % 4);
-        lastCell = { -1, -1 };   // no drag painting after a level / roll change
+        // Click: a hit with the brush's level and roll; a hit that already has them is cleared.
+        const bool same = on && session.laneLevel(c.x, c.y) == brushLevel && session.laneRoll(c.x, c.y) == brushRoll;
+        paintMode = same ? 0 : 1;
+        setCell(c.y, c.x, paintMode == 1);
+        lastCell = c;
         return;
     }
-
-    paintValue = !cellOn(c.y, c.x);
-    setCell(c.y, c.x, paintValue);
+    paintMode = cellOn(c.y, c.x) ? 0 : 1;
+    setCell(c.y, c.x, paintMode == 1);
     lastCell = c;
 }
 
 void SloopEditor::mouseDrag(const juce::MouseEvent& e)
 {
+    if (view != ViewPattern) return;
     const auto c = cellAt(e.getPosition());
     if (c.x < 0 || c == lastCell || lastCell.x < 0) return;
-    setCell(c.y, c.x, paintValue);
+    setCell(c.y, c.x, paintMode == 1);
     lastCell = c;
 }
 
 void SloopEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(kBg);
+    g.fillAll(u::bg);
     const int sel = selected();
 
-    // Header
-    g.setColour(kText);
-    g.setFont(juce::FontOptions(24.0f, juce::Font::bold));
-    g.drawText("SLOOP STUDIO", headerArea.withTrimmedTop(10).withHeight(28), juce::Justification::left);
-    g.setColour(kDim);
-    g.setFont(juce::FontOptions(12.0f));
-    g.drawText(juce::String(juce::CharPointer_UTF8("Secuenciador y controlador MIDI  \xc2\xb7  FL Studio  \xc2\xb7  "
-                                                   "control f\xc3\xadsico opcional con FM-1")),
-               headerArea.withTrimmedTop(38).withHeight(16), juce::Justification::left);
-
-    // Slider wells (LinearBar draws only the filled part)
-    g.setColour(kCellOff);
-    for (auto* s : { &lenSlider, &gateSlider, &velSlider, &chSlider })
-        g.fillRoundedRectangle(s->getBounds().toFloat(), 4.0f);
-
-    // Transport / FM-1 lights, left of the REC button
-    auto lights = juce::Rectangle<int>(syncButton.getX() - 186, headerArea.getY() + 18, 180, 28);
-    auto light = [&g](juce::Rectangle<int> r, bool on, juce::Colour c, const char* label) {
-        g.setColour(on ? c : juce::Colour(0xff3a3f4a));
-        g.fillEllipse(r.removeFromLeft(10).withSizeKeepingCentre(10, 10).toFloat());
-        g.setColour(kDim);
-        g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-        g.drawText(label, r.withTrimmedLeft(6), juce::Justification::centredLeft);
-    };
-    light(lights.removeFromLeft(80), proc.hostPlaying.load(), juce::Colour(0xff4ade80), "PLAY FL");
-    light(lights.removeFromLeft(100), midiLight > 0, juce::Colour(0xfffacc15), "MIDI IN");
-
-    // Track tabs
-    for (int t = 0; t < kTracks; ++t)
+    // --- header: the name, the FL / MIDI lights ---
     {
-        const auto r = tabRects[t].toFloat();
-        const auto col = trackColour(t);
-        const bool sending = (proc.trackMask() >> t) & 1u;
-        g.setColour(t == sel ? col.withAlpha(0.18f) : kPanel);
-        g.fillRoundedRectangle(r, 8.0f);
-        g.setColour(t == sel ? col : juce::Colour(0xff2f343d));
-        g.drawRoundedRectangle(r.reduced(0.5f), 8.0f, t == sel ? 2.0f : 1.0f);
-        g.setColour(col);
-        g.fillRoundedRectangle(r.withWidth(4.0f).reduced(0, 10), 2.0f);
-
-        auto text = tabRects[t].reduced(14, 8);
-        g.setColour(kText.withAlpha(sending ? 1.0f : 0.4f));
-        g.setFont(juce::FontOptions(15.0f, juce::Font::bold));
-        g.drawText(kTrackNames[t], text.removeFromTop(22), juce::Justification::left);
-        g.setColour(kDim.withAlpha(sending ? 1.0f : 0.5f));
-        g.setFont(juce::FontOptions(11.0f));
-        const juce::String dot(juce::CharPointer_UTF8("  \xc2\xb7  "));
-        juce::String sub = "CH " + juce::String(session.channel[t].load()) + dot
-                         + juce::String(session.length[t].load()) + " pasos";
-        if (!sending) sub += dot + juce::String(juce::CharPointer_UTF8("no sale aqu\xc3\xad"));
-        g.drawText(sub, text, juce::Justification::topLeft);
-
-        const bool muted = session.muted[t].load();
-        g.setColour(muted ? juce::Colour(0xffe5383b) : juce::Colour(0xff2f343d));
-        g.fillRoundedRectangle(muteRects[t].toFloat(), 4.0f);
-        g.setColour(muted ? juce::Colours::white : kDim);
-        g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-        g.drawText("M", muteRects[t], juce::Justification::centred);
+        auto h = headerArea;
+        g.setFont(u::mono(15.0f, true));
+        g.setColour(u::orange);
+        g.drawText("floop", h.removeFromLeft(52), juce::Justification::centredLeft);
+        g.setColour(u::fg);
+        g.drawText("studio", h.removeFromLeft(62), juce::Justification::centredLeft);
+        g.setColour(u::dim);
+        g.setFont(u::mono(11.0f));
+        g.drawText("by @HeyFresco", h.removeFromLeft(100), juce::Justification::centredLeft);
+        h.removeFromLeft(10);
+        auto light = [&g, &h](bool on, juce::Colour c, const char* label) {
+            auto r = h.removeFromLeft(58);
+            g.setColour(on ? c : u::s3);
+            g.fillEllipse(r.removeFromLeft(8).withSizeKeepingCentre(8, 8).toFloat());
+            g.setColour(u::dim);
+            g.setFont(u::mono(11.0f));
+            g.drawText(label, r.withTrimmedLeft(5), juce::Justification::centredLeft);
+        };
+        light(proc.hostPlaying.load(), u::green, "fl");
+        light(midiLight > 0, u::yellow, "midi");
     }
 
-    // Hint (left) and the FM-1 import status (right), between the tabs and the grid
-    g.setFont(juce::FontOptions(11.0f));
-    g.setColour(kDim);
-    if (!soundsView)
-    g.drawText(juce::String::fromUTF8(sel == kDrums
-                   ? "Clic: golpe   \xc2\xb7   Shift+clic: m\xc3\xa1s fuerte (GHOST \xe2\x86\x92 SOFT \xe2\x86\x92 NORM \xe2\x86\x92 HARD)   \xc2\xb7   Alt+clic: roll x1\xe2\x80\x93x4"
-                   : "Clic: nota (acordes permitidos)   \xc2\xb7   OCT -/+ mueve las dos octavas"),
-               hintArea.withTrimmedLeft(212), juce::Justification::centredLeft);
+    // the bars of pasos / gate / vel / ch (LinearBar draws only the filled part)
+    if (view == ViewPattern)
+        for (auto* s : { &lenSlider, &gateSlider, &velSlider, &chSlider })
+        {
+            g.setColour(u::s2);
+            g.fillRoundedRectangle(s->getBounds().toFloat(), 2.0f);
+        }
+
+    // --- tracks ---
+    for (int t = 0; t < kTracks; ++t)
+    {
+        const auto r = tabRects[(size_t) t];
+        const auto col = u::track(t);
+        const bool on = t == sel, sending = (proc.trackMask() >> t) & 1u, muted = session.muted[t].load();
+        g.setColour(on ? col.withAlpha(0.14f) : u::s1);
+        g.fillRoundedRectangle(r.toFloat(), 2.0f);
+        g.setColour(on ? col : u::line);
+        g.drawRoundedRectangle(r.toFloat().reduced(0.5f), 2.0f, 1.0f);
+        g.setColour(col);
+        g.fillRect(r.withWidth(3).reduced(0, 6));
+
+        auto text = r.reduced(10, 0).withTrimmedRight(28);
+        g.setFont(u::mono(12.0f, true));
+        g.setColour((on ? u::fg : u::fg2).withAlpha(sending ? 1.0f : 0.45f));
+        g.drawText(juce::String(kTrackNames[t]).toLowerCase(), text.removeFromLeft(text.getWidth() / 2 + 6), juce::Justification::centredLeft);
+        g.setFont(u::mono(10.5f));
+        g.setColour(u::dim.withAlpha(sending ? 1.0f : 0.5f));
+        g.drawText("ch " + juce::String(session.channel[t].load()) + " " + juce::String(session.length[t].load()) + "p"
+                       + (sending ? juce::String() : juce::String(" ·")),
+                   text, juce::Justification::centredRight);
+
+        const auto m = muteRects[(size_t) t].toFloat();
+        g.setColour(muted ? u::red : u::s2);
+        g.fillRoundedRectangle(m, 2.0f);
+        g.setColour(muted ? juce::Colours::black : u::dim);
+        g.setFont(u::mono(11.0f, true));
+        g.drawText("m", muteRects[(size_t) t], juce::Justification::centred);
+    }
+
+    // --- tabs row: the FM-1 link's state (right) ---
     {
         using S = sloop::Fm1Live::State;
         const auto st = proc.live->state();
         juce::String text = notice.isNotEmpty() ? notice : proc.live->message();
         if (notice.isEmpty() && proc.clock->isEnabled())
         {
-            const auto cm = proc.clock->waitingForBar() ? juce::String::fromUTF8("FM-1 entra en el próximo compás")
-                                                        : proc.clock->message();
-            text = text.isEmpty() ? cm : text + juce::String::fromUTF8("  ·  ") + cm;
+            const auto cm = proc.clock->waitingForBar() ? u8("el FM-1 entra en el próximo compás") : proc.clock->message();
+            text = text.isEmpty() ? cm : text + u8("  ·  ") + cm;
         }
-        juce::Colour c = notice.isNotEmpty() ? juce::Colour(0xfffacc15)
-                       : st == S::Live ? juce::Colour(0xff4ade80)
-                       : st == S::Error ? juce::Colour(0xffe5383b) : juce::Colour(0xfffacc15);
-        if (text.isNotEmpty())
-        {
-            g.setColour(c);
-            g.drawText(text, hintArea.withTrimmedRight(4), juce::Justification::centredRight);
-        }
+        const juce::Colour c = notice.isNotEmpty() ? u::yellow : st == S::Live ? u::green : st == S::Error ? u::red : u::yellow;
+        g.setFont(u::mono(11.0f));
+        g.setColour(text.isEmpty() ? u::dim : c);
+        g.drawText(text.isEmpty() ? u8("fm-1 sin conectar") : text.toLowerCase(), tabsArea.withTrimmedLeft(440),
+                   juce::Justification::centredRight, true);
     }
 
-    if (soundsView) return;   // the SONIDOS panel covers the rest
+    if (view != ViewPattern) return;   // SONIDO / SAMPLES cover the rest
 
-    // Grid
-    g.setColour(kPanel);
-    g.fillRoundedRectangle(gridArea.toFloat().expanded(4), 8.0f);
-    const auto col = trackColour(sel);
+    // --- patrón: the grid ---
+    const auto col = u::track(sel);
     const int len = session.length[sel].load();
     const int play = proc.playStep[sel].load();
     const int rows = rowCount();
+    const bool drums = sel == kDrums;
+
+    g.setFont(u::mono(10.5f));
+    const int first = firstStep(), last = first + visibleSteps();
+    const int every = zoomAll ? 16 : 4;   // the numbers: 1 · 5 · 9 · 13 on a page, 1 · 17 · 33 · 49 zoomed out
+    for (int step = first; step < last; ++step)
+    {
+        if (step % every && step != play) continue;
+        const auto b = cellBounds(0, step);
+        g.setColour(step == play ? col : u::dim);
+        g.drawText(juce::String(step + 1), b.getX() + 2, numbersArea.getY(), b.getWidth(), numbersArea.getHeight(),
+                   juce::Justification::centredLeft);
+    }
 
     for (int row = 0; row < rows; ++row)
     {
         const auto rr = cellBounds(row, 0);
-        auto label = juce::Rectangle<int>(gridArea.getX(), rr.getY(), kLabelWidth - 8, rr.getHeight());
+        auto label = juce::Rectangle<int>(gridArea.getX(), rr.getY(), kLabelWidth - 6, rr.getHeight());
         juce::String name;
         bool black = false;
-        if (sel == kDrums) name = kLaneNames[row];
+        if (drums) name = juce::String(kLaneNames[(size_t) row]).toLowerCase();
         else
         {
             const int n = noteForRow(row);
             black = juce::String(kNoteNames[n % 12]).contains("#");
             name = noteName(n);
         }
-        if (black)
-        {
-            g.setColour(juce::Colour(0xff1a1d22));
-            g.fillRect(label.withRight(cellBounds(row, kSteps - 1).getRight()));
-        }
-        g.setColour(name.startsWith("C") && !black && sel != kDrums ? kText : kDim);
-        g.setFont(juce::FontOptions(juce::jmin(12.0f, rr.getHeight() * 0.7f), juce::Font::bold));
-        g.drawText(name, label.withTrimmedLeft(8), juce::Justification::centredLeft);
+        g.setColour(!drums && name.startsWith("C") && !black ? u::fg : u::fg2.withAlpha(black ? 0.5f : 0.85f));
+        g.setFont(u::mono(juce::jmin(11.5f, rr.getHeight() * 0.72f)));
+        g.drawText(name, label, juce::Justification::centredLeft);
     }
 
-    for (int step = 0; step < kSteps; ++step)
+    static const float levelAlpha[4] = { 0.9f, 0.38f, 0.62f, 1.0f };   // NORM GHOST SOFT HARD
+    for (int step = first; step < last; ++step)
     {
-        if (step == play)
-        {
-            auto colRect = cellBounds(0, step).getUnion(cellBounds(rows - 1, step));
-            g.setColour(juce::Colours::white.withAlpha(0.07f));
-            g.fillRect(colRect);
-        }
+        const bool beat = step % 4 == 0;
         for (int row = 0; row < rows; ++row)
         {
-            const auto c = cellBounds(row, step).reduced(2).toFloat();
+            const auto c = cellBounds(row, step).reduced(1).toFloat();
             const bool on = cellOn(row, step);
-            const bool inLen = step < len;
-            const bool drum = sel == kDrums;
-            const int level = on && drum ? session.laneLevel(step, row) : LvNorm;
-            static const float levelAlpha[4] = { 0.85f, 0.35f, 0.6f, 1.0f };   // NORM GHOST SOFT HARD
-            juce::Colour fill = on ? col.withMultipliedAlpha(levelAlpha[level])
-                                   : (step / 4) % 2 == 0 ? kCellOff : kCellBeat;
-            if (!inLen) fill = fill.withMultipliedAlpha(0.25f);
-            if (on && step == play) fill = fill.brighter(0.5f);
-            g.setColour((step / 4) % 2 == 0 ? kCellOff : kCellBeat);
-            g.fillRoundedRectangle(c, 3.0f);
-            g.setColour(fill);
-            g.fillRoundedRectangle(c, 3.0f);
-            if (on && drum)
+            const bool blackRow = !drums && juce::String(kNoteNames[noteForRow(row) % 12]).contains("#");
+            juce::Colour base = beat ? u::s3 : u::s2;
+            if (blackRow) base = base.darker(0.35f);
+            if (step >= len) base = base.withMultipliedAlpha(0.35f);
+            g.setColour(base);
+            g.fillRect(c);
+            if (on)
             {
-                if (level == LvHard)
+                const int level = drums ? session.laneLevel(step, row) : LvNorm;
+                juce::Colour fill = col.withMultipliedAlpha(levelAlpha[level]);
+                if (step >= len) fill = fill.withMultipliedAlpha(0.35f);
+                if (step == play) fill = fill.brighter(0.45f);
+                g.setColour(fill);
+                g.fillRect(c);
+                if (drums)
                 {
-                    g.setColour(juce::Colours::white.withAlpha(0.8f));
-                    g.drawRoundedRectangle(c.reduced(0.5f), 3.0f, 1.2f);
+                    if (level == LvHard)
+                    {
+                        g.setColour(u::fg.withAlpha(0.85f));
+                        g.drawRect(c, 1.0f);
+                    }
+                    const int hits = session.laneRoll(step, row) + 1;   // a roll: one slice per hit
+                    g.setColour(u::bg.withAlpha(0.8f));
+                    for (int k = 1; k < hits; ++k)
+                        g.fillRect(c.getX() + c.getWidth() * k / hits - 1.0f, c.getY() + 2.0f, 2.0f, c.getHeight() - 4.0f);
                 }
-                const int hits = session.laneRoll(step, row) + 1;   // a roll: one slice per hit
-                g.setColour(kBg.withAlpha(0.85f));
-                for (int k = 1; k < hits; ++k)
-                {
-                    const float x = c.getX() + c.getWidth() * k / hits;
-                    g.fillRect(x - 1.0f, c.getY() + 3.0f, 2.0f, c.getHeight() - 6.0f);
-                }
+            }
+            else if (step == play)
+            {
+                g.setColour(u::fg.withAlpha(0.07f));
+                g.fillRect(c);
             }
         }
     }
 
-    // Step numbers under the grid
-    g.setFont(juce::FontOptions(10.0f));
-    for (int step = 0; step < kSteps; ++step)
-    {
-        const auto b = cellBounds(rows - 1, step);
-        g.setColour(step == play ? col : kDim.withAlpha(0.7f));
-        g.drawText(juce::String(step + 1), b.withY(b.getBottom() + 2).withHeight(12), juce::Justification::centred);
-    }
+    if (zoomAll)   // the bar lines between the 4 bars of 16
+        for (int bar = 1; bar < kSteps / kPageSteps; ++bar)
+        {
+            const auto b = cellBounds(0, bar * kPageSteps);
+            g.setColour(u::fg2.withAlpha(0.5f));
+            g.fillRect(b.getX() - 1, gridArea.getY(), 2, gridArea.getHeight());
+        }
+
+    g.setFont(u::mono(10.5f));
+    g.setColour(u::dim);
+    g.drawText(drums ? u8("clic: golpe con el nivel y roll elegidos · otra vez: lo quita · shift+clic: más fuerte · teclas blancas desde F3")
+                     : u8("clic: nota (hasta 4 por paso con el FM-1) · octava -/+ mueve las dos octavas"),
+               hintArea, juce::Justification::centredLeft, true);
 }

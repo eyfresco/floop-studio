@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// SLOOP Studio — turns the shared Session into MIDI notes, sample-accurate, following FL's transport.
+// Floop Studio — turns the shared Session into MIDI notes, sample-accurate, following FL's transport.
 //
 // One step = a 16th note. The pattern position comes from the host's song position (PPQ), so a
 // step always lands on FL's grid, also after a loop, a jump or a tempo change. No allocation, no

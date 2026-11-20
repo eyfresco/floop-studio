@@ -25,12 +25,12 @@ if(SLOOP_BUILD_PLUGIN)
     add_subdirectory(external/JUCE)
 
     juce_add_plugin(SLOOPStudio
-        COMPANY_NAME "SLOOP Studio"
-        BUNDLE_ID "studio.sloop.fl"
+        COMPANY_NAME "HeyFresco"
+        BUNDLE_ID "com.heyfresco.floopstudio"
         PLUGIN_MANUFACTURER_CODE Slps
         PLUGIN_CODE Sl01
         FORMATS VST3 AU Standalone
-        PRODUCT_NAME "SLOOP Studio"
+        PRODUCT_NAME "Floop Studio"
         IS_SYNTH TRUE
         NEEDS_MIDI_INPUT TRUE
         NEEDS_MIDI_OUTPUT TRUE
@@ -48,7 +48,9 @@ if(SLOOP_BUILD_PLUGIN)
         Source/FM1Clock.cpp
         Source/SampleTools.cpp
         Source/SamplesPanel.cpp
-        Source/MacMidiOut.cpp)
+        Source/MacMidiOut.cpp
+        Source/SoundPanel.cpp
+        Source/MidiMapPanel.cpp)
 
     target_compile_definitions(SLOOPStudio PUBLIC
         JUCE_WEB_BROWSER=0
@@ -77,7 +79,7 @@ if(SLOOP_BUILD_PLUGIN)
     # Renders the editor to PNG without a host (Tests/UiSnapshot.cpp).
     juce_add_console_app(sloop_ui_snapshot PRODUCT_NAME "sloop_ui_snapshot")
     target_sources(sloop_ui_snapshot PRIVATE Tests/UiSnapshot.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp
-        Source/FM1Import.cpp Source/FM1Live.cpp Source/FM1Clock.cpp Source/SampleTools.cpp Source/SamplesPanel.cpp Source/MacMidiOut.cpp)
+        Source/FM1Import.cpp Source/FM1Live.cpp Source/FM1Clock.cpp Source/SampleTools.cpp Source/SamplesPanel.cpp Source/MacMidiOut.cpp Source/SoundPanel.cpp Source/MidiMapPanel.cpp)
     target_include_directories(sloop_ui_snapshot PRIVATE Source)
     target_compile_definitions(sloop_ui_snapshot PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(sloop_ui_snapshot PRIVATE sloop_core juce::juce_audio_utils

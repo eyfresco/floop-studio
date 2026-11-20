@@ -31,7 +31,7 @@ private:
     int32_t uniqueId = 0;
 };
 
-// A MIDI source of our own, "SLOOP Studio", that FL Studio sees as a controller (its script,
+// A MIDI source of our own, "Floop Studio", that FL Studio sees as a controller (its script,
 // Scripts/FL/device_SLOOP_Studio.py, turns the FM-1's PLAY / STOP into FL's). One per process.
 class VirtualMidiSource
 {

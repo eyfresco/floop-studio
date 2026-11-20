@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // End-to-end check of the built VST3: loads it like a host, writes a pattern through its saved
 // state, plays it with a moving transport, checks the MIDI it sends, and saves a picture of the UI.
-//   sloop_host_check <path to SLOOP Studio.vst3> <output png>
+//   sloop_host_check <path to Floop Studio.vst3> <output png>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "Session.h"
