@@ -259,7 +259,7 @@ With **reloj: fl → fm-1**, what you record lands in time with FL.
 - `sloop_host_check`: loads the VST3 and checks its MIDI.
 - `sloop_ui_snapshot`: renders the screenshots in `docs/`.
 
-**Tested in FL Studio 2026:** the plugin loads, follows the transport, and its MIDI reaches Surge XT.
+**Tested in FL Studio 2026:** the plugin loads, follows the transport, and its MIDI reaches Surge XT. The FL script loads without errors, and with **play fm-1 → fl** the FM-1's PLAY and STOP start and stop FL (20 Nov 2026).
 
 **Tested with a real FM-1 (SLOOP 2.8.5), using `sloop_fm1_probe`:**
 
@@ -274,7 +274,7 @@ With **reloj: fl → fm-1**, what you record lands in time with FL.
 
 **Not tested yet:**
 
-- the play bridge and External sync inside FL;
+- External sync (reloj fm-1 → fl) inside FL;
 - 64 steps with the FM-1;
 - loading and saving user presets on the device;
 - FPC or FLEX through Patcher.
